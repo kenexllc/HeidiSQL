@@ -6,7 +6,7 @@ interface
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, ComCtrls, StdCtrls,
   ExtCtrls, ToolWin, ClipBrd, Generics.Collections, Generics.Defaults, SynRegExpr, extra_controls,
-  dbconnection, apphelpers, VirtualTrees, Menus, gnugettext;
+  dbconnection, dbstructures, apphelpers, VirtualTrees, Menus, gnugettext;
 
 {$I const.inc}
 
@@ -40,7 +40,7 @@ type
 
   EInputError = class(Exception);
 
-  TUserManagerForm = class(TFormWithSizeGrip)
+  TUserManagerForm = class(TExtForm)
     btnCancel: TButton;
     btnSave: TButton;
     pnlLeft: TPanel;
@@ -207,6 +207,7 @@ end;
 procedure TUserManagerForm.FormCreate(Sender: TObject);
 begin
   // Restore GUI setup
+  HasSizeGrip := True;
   lblWarning.Font.Color := clRed;
   Width := AppSettings.ReadInt(asUsermanagerWindowWidth);
   Height := AppSettings.ReadInt(asUsermanagerWindowHeight);
@@ -214,7 +215,6 @@ begin
   FixVT(listUsers);
   FixVT(treePrivs);
   Mainform.RestoreListSetup(listUsers);
-  TranslateComponent(Self);
   PrivsRead := Explode(',', 'SELECT,SHOW VIEW,SHOW DATABASES,PROCESS,EXECUTE');
   PrivsWrite := Explode(',', 'ALTER,CREATE,DROP,DELETE,UPDATE,INSERT,ALTER ROUTINE,CREATE ROUTINE,CREATE TEMPORARY TABLES,CREATE VIEW,INDEX,TRIGGER,EVENT,REFERENCES,CREATE TABLESPACE');
   PrivsAdmin := Explode(',', 'RELOAD,SHUTDOWN,REPLICATION CLIENT,REPLICATION SLAVE,SUPER,LOCK TABLES,GRANT,FILE,CREATE USER');
@@ -323,7 +323,8 @@ begin
 
   // Load user@host list
   try
-    tmp := FConnection.GetVar('SHOW VARIABLES LIKE '+FConnection.EscapeString('skip_name_resolve'), 1);
+
+    tmp := FConnection.GetSessionVariable('skip_name_resolve');
     SkipNameResolve := LowerCase(tmp) = 'on';
 
     FConnection.Query('FLUSH PRIVILEGES');
@@ -369,7 +370,7 @@ begin
     FAdded := False;
     listUsers.OnFocusChanged(listUsers, listUsers.FocusedNode, listUsers.FocusedColumn);
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ErrorDialog(E.Message);
       // Closing form in OnShow does not work. Instead, do that in listUsers.OnBeforePaint.
     end;
@@ -541,7 +542,7 @@ begin
     end else try
       Grants := FConnection.GetCol('SHOW GRANTS FOR '+esc(User.Username)+'@'+esc(User.Host));
     except
-      on E:EDatabaseError do begin
+      on E:EDbError do begin
         Msg := E.Message;
         if FConnection.LastErrorCode = 1141 then begin
           // Disable this user node lately, for old server which do not show skip-name-resolve variable
@@ -1341,7 +1342,7 @@ begin
     FocusedUser.Subject := editSubject.Text;
     listUsers.OnFocusChanged(listUsers, listUsers.FocusedNode, listUsers.FocusedColumn);
   except
-    on E:EDatabaseError do
+    on E:EDbError do
       ErrorDialog(E.Message);
     on E:EInputError do
       ErrorDialog(E.Message);
@@ -1390,7 +1391,7 @@ begin
       FConnection.Query('FLUSH PRIVILEGES');
       FUsers.Remove(User^);
       listUsers.DeleteNode(listUsers.FocusedNode);
-    except on E:EDatabaseError do
+    except on E:EDbError do
       ErrorDialog(E.Message);
     end;
   end;

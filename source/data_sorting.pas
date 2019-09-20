@@ -4,11 +4,11 @@ interface
 
 uses
   Windows, SysUtils, Classes, Controls, Forms, StdCtrls, ExtCtrls, ComCtrls, Buttons,
-  Vcl.Graphics, apphelpers, gnugettext;
+  Vcl.Graphics, apphelpers, gnugettext, extra_controls;
 
 
 type
-  TDataSortingForm = class(TForm)
+  TDataSortingForm = class(TExtForm)
     pnlBevel: TPanel;
     btnOK: TButton;
     btnCancel: TButton;
@@ -47,8 +47,6 @@ procedure TDataSortingForm.FormCreate(Sender: TObject);
 var
   i: Integer;
 begin
-  TranslateComponent(Self);
-
   ColumnNames := TStringList.Create;
   // Take column names from listColumns and add here
   for i:=0 to Mainform.SelectedTableColumns.Count-1 do begin
@@ -83,12 +81,12 @@ begin
       Components[i].Free;
   end;
 
-  Margin := Round(3 * DpiScaleFactor(Self));
+  Margin := 3;
   MarginBig := Margin * 2;
-  Width1 := Round(15 * DpiScaleFactor(Self));
-  Width2 := Round(160 * DpiScaleFactor(Self));
-  Width3 := Round(23 * DpiScaleFactor(Self));
-  Width4 := Round(23 * DpiScaleFactor(Self));
+  Width1 := 15;
+  Width2 := 160;
+  Width3 := 23;
+  Width4 := 23;
 
   // Set initial width to avoid resizing form to 0
   TopPos := pnlBevel.BorderWidth + MarginBig;

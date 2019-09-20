@@ -5,10 +5,10 @@ interface
 
 uses
   Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, extra_controls,
-  dbconnection, VirtualTrees, SynEdit, SynMemo, Menus, gnugettext;
+  dbconnection, dbstructures, VirtualTrees, SynEdit, SynMemo, Menus, gnugettext;
 
 type
-  TCopyTableForm = class(TFormWithSizeGrip)
+  TCopyTableForm = class(TExtForm)
     editNewTablename: TEdit;
     lblNewTablename: TLabel;
     btnCancel: TButton;
@@ -67,8 +67,7 @@ const
 
 procedure TCopyTableForm.FormCreate(Sender: TObject);
 begin
-  TranslateComponent(Self);
-  FixDropDownButtons(Self);
+  HasSizeGrip := True;
   Width := AppSettings.ReadInt(asCopyTableWindowWidth);
   Height := AppSettings.ReadInt(asCopyTableWindowHeight);
   MainForm.SetupSynEditors;
@@ -495,7 +494,7 @@ begin
     else
       FConnection.ClearDbObjects(comboDatabase.Text);
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       Screen.Cursor := crDefault;
       Msg := E.Message;
       if FConnection.LastErrorCode = 1075 then

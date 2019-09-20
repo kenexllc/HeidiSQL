@@ -7,7 +7,7 @@
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
         <FrameworkType>VCL</FrameworkType>
-        <ProjectVersion>18.5</ProjectVersion>
+        <ProjectVersion>18.6</ProjectVersion>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
@@ -75,7 +75,7 @@
         <DCC_F>false</DCC_F>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <SanitizedProjectName>heidisql</SanitizedProjectName>
-        <DCC_LegacyIFEND>true</DCC_LegacyIFEND>
+        <DCC_LegacyIFEND>false</DCC_LegacyIFEND>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win32)'!=''">
         <DCC_Namespace>Datasnap.Win;Web.Win;Soap.Win;Xml.Win;Bde;$(DCC_Namespace)</DCC_Namespace>
@@ -100,6 +100,7 @@
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Keys>CompanyName=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductVersion=1.0.0.0;Comments=;ProgramID=com.embarcadero.$(MSBuildProjectName);FileDescription=$(MSBuildProjectName);ProductName=$(MSBuildProjectName)</VerInfo_Keys>
+        <DCC_LegacyIFEND>false</DCC_LegacyIFEND>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
@@ -120,7 +121,7 @@
         <BT_BuildType>Debug</BT_BuildType>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
-        <DCC_LegacyIFEND>true</DCC_LegacyIFEND>
+        <DCC_LegacyIFEND>false</DCC_LegacyIFEND>
         <DCC_DebugInformation>2</DCC_DebugInformation>
         <DCC_Define>madExcept;$(DCC_Define)</DCC_Define>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
@@ -169,7 +170,7 @@
         <DCCReference Include="..\..\source\sqlhelp.pas">
             <Form>frmSQLhelp</Form>
         </DCCReference>
-        <DCCReference Include="..\..\source\mysql_structures.pas"/>
+        <DCCReference Include="..\..\source\dbstructures.pas"/>
         <DCCReference Include="..\..\source\column_selection.pas">
             <Form>ColumnSelectionForm</Form>
         </DCCReference>
@@ -231,6 +232,10 @@
         <DCCReference Include="..\..\source\extra_controls.pas"/>
         <DCCReference Include="..\..\source\change_password.pas">
             <Form>frmPasswordChange</Form>
+            <FormType>dfm</FormType>
+        </DCCReference>
+        <DCCReference Include="..\..\source\theme_preview.pas">
+            <Form>frmThemePreview</Form>
             <FormType>dfm</FormType>
         </DCCReference>
         <BuildConfiguration Include="Debug">

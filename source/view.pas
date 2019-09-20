@@ -5,7 +5,7 @@ interface
 uses
   Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, SynEdit, SynMemo,
   ExtCtrls,
-  dbconnection, mysql_structures, apphelpers, gnugettext;
+  dbconnection, dbstructures, apphelpers, gnugettext;
 
 type
   TFrame = TDBObjectEditor;
@@ -52,7 +52,6 @@ uses main;
 constructor TfrmView.Create(AOwner: TComponent);
 begin
   inherited;
-  TranslateComponent(Self);
   SynMemoBody.Highlighter := Mainform.SynSQLSynUsed;
   Mainform.SynCompletionProposal.AddEditor(SynMemoBody);
   editName.MaxLength := NAME_LEN;
@@ -119,7 +118,7 @@ end;
 procedure TfrmView.comboDefinerDropDown(Sender: TObject);
 begin
   // Populate definers from mysql.user
-  (Sender as TComboBox).Items.Assign(GetDefiners);
+  (Sender as TComboBox).Items.Assign(DBObject.Connection.AllUserHostCombinations);
 end;
 
 
@@ -188,7 +187,7 @@ begin
     btnSave.Enabled := Modified;
     btnDiscard.Enabled := Modified;
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ErrorDialog(E.Message);
       Result := mrAbort;
     end;

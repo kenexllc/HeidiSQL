@@ -11,10 +11,10 @@ interface
 uses
   Windows, SysUtils, Classes, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls,
   VirtualTrees, Menus, Graphics, Generics.Collections, ActiveX, extra_controls, Messages,
-  dbconnection, gnugettext;
+  dbconnection, gnugettext, SynRegExpr, System.Types, System.IOUtils, Vcl.GraphUtil, ADODB;
 
 type
-  Tconnform = class(TFormWithSizeGrip)
+  Tconnform = class(TExtForm)
     btnCancel: TButton;
     btnOpen: TButton;
     btnSave: TButton;
@@ -115,12 +115,11 @@ type
     updownKeepAlive: TUpDown;
     lblCounterRight2: TLabel;
     lblCounterLeft2: TLabel;
-    pnlDpiHelperSettings: TPanel;
-    pnlDpiHelperSshTunnel: TPanel;
-    pnlDpiHelperAdvanced: TPanel;
     TimerButtonAnimation: TTimer;
     lblBackgroundColor: TLabel;
     ColorBoxBackgroundColor: TColorBox;
+    comboLibrary: TComboBox;
+    lblLibrary: TLabel;
     procedure FormCreate(Sender: TObject);
     procedure btnOpenClick(Sender: TObject);
     procedure FormShow(Sender: TObject);
@@ -170,12 +169,13 @@ type
     procedure btnMoreClick(Sender: TObject);
     procedure menuRenameClick(Sender: TObject);
     procedure TimerButtonAnimationTimer(Sender: TObject);
+    procedure ColorBoxBackgroundColorGetColors(Sender: TCustomColorBox;
+      Items: TStrings);
   private
     { Private declarations }
     FLoaded: Boolean;
     FSessionModified, FOnlyPasswordModified: Boolean;
     FServerVersion: String;
-    FSessionColor: TColor;
     FSettingsImportWaitTime: Cardinal;
     FPopupDatabases: TPopupMenu;
     FButtonAnimationStep: Integer;
@@ -189,6 +189,8 @@ type
     procedure MenuDatabasesClick(Sender: TObject);
     procedure WMNCLBUTTONDOWN(var Msg: TWMNCLButtonDown) ; message WM_NCLBUTTONDOWN;
     procedure WMNCLBUTTONUP(var Msg: TWMNCLButtonUp) ; message WM_NCLBUTTONUP;
+    procedure RefreshBackgroundColors;
+    procedure RefreshLibraries(Sess: TConnectionParameters);
   public
     { Public declarations }
   end;
@@ -232,8 +234,7 @@ var
   Params: TConnectionParameters;
 begin
   // Fix GUI stuff
-  TranslateComponent(Self);
-  FixDropDownButtons(Self);
+  HasSizeGrip := True;
   lblDownloadPlink.Font.Style := [fsUnderline];
   lblDownloadPlink.Font.Color := clBlue;
 
@@ -293,16 +294,19 @@ var
   SessNode: PVirtualNode;
 begin
   // Initialize session tree
-  if ParentNode=nil then
-    ListSessions.Clear
-  else
+  // And while we're at it, collect custom colors for background color selector
+  if ParentNode=nil then begin
+    ListSessions.Clear;
+  end else begin
     ListSessions.DeleteChildren(ParentNode, True);
+  end;
   SessionNames := NodeSessionNames(ParentNode, RegKey);
   for i:=0 to SessionNames.Count-1 do begin
     Params := TConnectionParameters.Create(RegKey+SessionNames[i]);
     SessNode := ListSessions.AddChild(ParentNode, PConnectionParameters(Params));
-    if Params.IsFolder then
+    if Params.IsFolder then begin
       RefreshSessions(SessNode);
+    end;
   end;
 end;
 
@@ -388,6 +392,7 @@ begin
   Sess.LocalTimeZone := chkLocalTimeZone.Checked;
   Sess.FullTableStatus := chkFullTableStatus.Checked;
   Sess.SessionColor := ColorBoxBackgroundColor.Selected;
+  Sess.LibraryOrProvider := comboLibrary.Text;
   Sess.AllDatabasesStr := editDatabases.Text;
   Sess.Comment := memoComment.Text;
   Sess.StartupScriptFilename := editStartupScript.Text;
@@ -568,7 +573,7 @@ begin
   end else begin
     Result := TConnectionParameters.Create;
     Result.SessionPath := SelectedSessionPath;
-    Result.SessionColor := FSessionColor;
+    Result.SessionColor := ColorBoxBackgroundColor.Selected;
     Result.NetType := TNetType(comboNetType.ItemIndex);
     Result.ServerVersion := FServerVersion;
     Result.Hostname := editHost.Text;
@@ -582,6 +587,7 @@ begin
     else
       Result.Port := 0;
     Result.AllDatabasesStr := editDatabases.Text;
+    Result.LibraryOrProvider := comboLibrary.Text;
     Result.Comment := memoComment.Text;
     Result.SSHHost := editSSHHost.Text;
     Result.SSHPort := MakeInt(editSSHPort.Text);
@@ -846,8 +852,14 @@ begin
     updownKeepAlive.Position := Sess.KeepAlive;
     chkLocalTimeZone.Checked := Sess.LocalTimeZone;
     chkFullTableStatus.Checked := Sess.FullTableStatus;
+    RefreshBackgroundColors;
     ColorBoxBackgroundColor.Selected := Sess.SessionColor;
     editDatabases.Text := Sess.AllDatabasesStr;
+    RefreshLibraries(Sess^);
+    comboLibrary.ItemIndex := comboLibrary.Items.IndexOf(Sess.LibraryOrProvider);
+    if (comboLibrary.ItemIndex = -1) and (comboLibrary.Items.Count > 0) then begin
+      comboLibrary.ItemIndex := 0;
+    end;
     memoComment.Text := Sess.Comment;
     editStartupScript.Text := Sess.StartupScriptFilename;
     editSSHPlinkExe.Text := Sess.SSHPlinkExe;
@@ -864,7 +876,6 @@ begin
     editSSLCACertificate.Text := Sess.SSLCACertificate;
     editSSLCipher.Text := Sess.SSLCipher;
     FServerVersion := Sess.ServerVersion;
-    FSessionColor := Sess.SessionColor;
   end;
 
   FLoaded := True;
@@ -875,6 +886,53 @@ begin
   TimerStatistics.OnTimer(Sender);
 
   Screen.Cursor := crDefault;
+end;
+
+
+procedure Tconnform.RefreshBackgroundColors;
+begin
+  // Trigger OnGetColors event
+  ColorBoxBackgroundColor.Style := ColorBoxBackgroundColor.Style - [cbCustomColors];
+  ColorBoxBackgroundColor.Style := ColorBoxBackgroundColor.Style + [cbCustomColors];
+end;
+
+
+procedure Tconnform.RefreshLibraries(Sess: TConnectionParameters);
+var
+  rx: TRegExpr;
+  Libs: TStringDynArray;
+  LibPath, LibFile: String;
+  Providers: TStringList;
+  Provider: String;
+begin
+  // Detect existing dll files in app folder
+  comboLibrary.Clear;
+
+  rx := TRegExpr.Create;
+  rx.ModifierI := True;
+  case Sess.NetTypeGroup of
+    ngMySQL: rx.Expression := '^lib(mysql|mariadb).*\.dll$';
+    ngMSSQL: rx.Expression := '^(MSOLEDBSQL|SQLOLEDB)$';
+    ngPgSQL: rx.Expression := '^libpq.*\.dll$';
+  end;
+
+  if Sess.NetTypeGroup in [ngMySQL, ngPgSQL] then begin
+    Libs := TDirectory.GetFiles(ExtractFilePath(ParamStr(0)), '*.dll');
+    for LibPath in Libs do begin
+      LibFile := ExtractFileName(LibPath);
+      if rx.Exec(LibFile) then begin
+        comboLibrary.Items.Add(LibFile);
+      end;
+    end;
+  end else begin
+    Providers := TStringList.Create;
+    GetProviderNames(Providers);
+    for Provider in Providers do begin
+      if rx.Exec(Provider) then begin
+        comboLibrary.Items.Add(Provider);
+      end;
+    end;
+  end;
 end;
 
 
@@ -985,6 +1043,28 @@ begin
 end;
 
 
+procedure Tconnform.ColorBoxBackgroundColorGetColors(Sender: TCustomColorBox;
+  Items: TStrings);
+var
+  Node: PVirtualNode;
+  PParams: PConnectionParameters;
+  ColorName,
+  ColorNamePrefix: String;
+begin
+  // Collect custom session colors into color selector
+  ColorNamePrefix := _('Custom color:') + ' ';
+  Node := ListSessions.GetFirst;
+  while Assigned(Node) do begin
+    PParams := ListSessions.GetNodeData(Node);
+    ColorName := ColorNamePrefix + ColorToWebColorStr(PParams.SessionColor);
+    if (PParams.SessionColor <> clNone) and (Items.IndexOf(ColorName) = -1) then begin
+      Items.AddObject(ColorName, TObject(PParams.SessionColor));
+    end;
+    Node := ListSessions.GetNext(Node);
+  end;
+end;
+
+
 procedure Tconnform.editDatabasesRightButtonClick(Sender: TObject);
 var
   Connection: TDBConnection;
@@ -1078,6 +1158,7 @@ begin
       updownPort.Position := Params.DefaultPort;
     if not editUsername.Modified then
       editUsername.Text := Params.DefaultUsername;
+    comboLibrary.ItemIndex := comboLibrary.Items.IndexOf(Params.DefaultLibrary);
   end;
 
   FLastSelectedNetTypeGroup := Params.NetTypeGroup;
@@ -1108,6 +1189,7 @@ begin
       or (Sess.SessionColor <> ColorBoxBackgroundColor.Selected)
       or (Sess.NetType <> TNetType(comboNetType.ItemIndex))
       or (Sess.StartupScriptFilename <> editStartupScript.Text)
+      or (Sess.LibraryOrProvider <> comboLibrary.Text)
       or (Sess.AllDatabasesStr <> editDatabases.Text)
       or (Sess.Comment <> memoComment.Text)
       or (Sess.SSHHost <> editSSHHost.Text)
@@ -1183,15 +1265,13 @@ begin
       lblPassword.Enabled := lblUsername.Enabled;
       editPassword.Enabled := lblUsername.Enabled;
       lblPort.Enabled := Params.NetType in [ntMySQL_TCPIP, ntMySQL_SSHtunnel, ntMSSQL_TCPIP, ntPgSQL_TCPIP, ntPgSQL_SSHtunnel];
-      if (Params.NetType = ntMSSQL_TCPIP) and (Pos('\', editHost.Text) > 0) then
-        lblPort.Enabled := False; // Named instance without port
       editPort.Enabled := lblPort.Enabled;
       updownPort.Enabled := lblPort.Enabled;
       if Params.NetTypeGroup = ngPgSQL then
         lblDatabase.Caption := _('Database')+':'
       else
         lblDatabase.Caption := _('Databases')+':';
-      chkWantSSL.Enabled := Params.NetType in [ntMySQL_TCPIP, ntMySQL_SSHtunnel];
+      chkWantSSL.Enabled := Params.NetType in [ntMySQL_TCPIP, ntMySQL_SSHtunnel, ntPgSQL_TCPIP, ntPgSQL_SSHtunnel];
       lblSSLPrivateKey.Enabled := Params.WantSSL;
       editSSLPrivateKey.Enabled := Params.WantSSL;
       lblSSLCACertificate.Enabled := Params.WantSSL;

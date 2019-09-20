@@ -5,7 +5,7 @@ interface
 uses
   Windows, SysUtils, Classes, Controls, Forms, Dialogs, StdCtrls, SynEdit, SynMemo,
   SynCompletionProposal, SynRegExpr,
-  dbconnection, mysql_structures, apphelpers, gnugettext, ComCtrls;
+  dbconnection, dbstructures, apphelpers, gnugettext, ComCtrls;
 
 type
   TFrame = TDBObjectEditor;
@@ -63,7 +63,6 @@ var
   i: Integer;
 begin
   inherited;
-  TranslateComponent(Self);
   SynMemoBody.Highlighter := Mainform.SynSQLSynUsed;
   editName.MaxLength := NAME_LEN;
   comboTiming.Items.Text := 'BEFORE'+CRLF+'AFTER';
@@ -134,9 +133,9 @@ begin
             if rx.Exec(Body) then
               Body := rx.Match[1]
             else
-              raise EDatabaseError.CreateFmt(_('Result from previous query does not contain expected pattern: %s'), [rx.Expression]);
+              raise EDbError.CreateFmt(_('Result from previous query does not contain expected pattern: %s'), [rx.Expression]);
           except
-            on E:EDatabaseError do begin
+            on E:EDbError do begin
               DBObject.Connection.Log(lcError, E.Message);
               Body := Definitions.Col('Statement');
             end;
@@ -164,7 +163,7 @@ begin
     end;
   end;
   // Buttons are randomly moved, since VirtualTree update, see #440
-  btnSave.Top := Height - btnSave.Height - Round(3 * DpiScaleFactor(MainForm));
+  btnSave.Top := Height - btnSave.Height - 3;
   btnHelp.Top := btnSave.Top;
   btnDiscard.Top := btnSave.Top;
   Modification(Self);
@@ -215,7 +214,7 @@ end;
 procedure TfrmTriggerEditor.comboDefinerDropDown(Sender: TObject);
 begin
   // Populate definers from mysql.user
-  (Sender as TComboBox).Items.Assign(GetDefiners);
+  (Sender as TComboBox).Items.Assign(DBObject.Connection.AllUserHostCombinations);
 end;
 
 
@@ -242,7 +241,7 @@ begin
     btnSave.Enabled := Modified;
     btnDiscard.Enabled := Modified;
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ErrorDialog(E.Message);
       Result := mrAbort;
     end;

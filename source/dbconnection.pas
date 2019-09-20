@@ -3,7 +3,7 @@ unit dbconnection;
 interface
 
 uses
-  Classes, SysUtils, windows, mysql_structures, SynRegExpr, Generics.Collections, Generics.Defaults,
+  Classes, SysUtils, windows, dbstructures, SynRegExpr, Generics.Collections, Generics.Defaults,
   DateUtils, Types, Math, Dialogs, ADODB, DB, DBCommon, ComObj, Graphics, ExtCtrls, StrUtils,
   gnugettext, AnsiStrings, Controls, Forms;
 
@@ -123,7 +123,7 @@ type
       function GetImageIndex: Integer;
     public
       Name, OldName: String;
-      IndexType, OldIndexType, Algorithm: String;
+      IndexType, OldIndexType, Algorithm, Comment: String;
       Columns, SubParts: TStringList;
       Modified, Added: Boolean;
       constructor Create(AOwner: TDBConnection);
@@ -170,13 +170,6 @@ type
   end;
   TUpdateData = TObjectList<TRowData>;
 
-  // Custom exception class for any connection or database related error
-  EDatabaseError = class(Exception)
-    public
-      ErrorCode: Cardinal;
-      constructor Create(const Msg: string; const ErrorCode: Cardinal=0);
-  end;
-
   // PLink.exe related
   TProcessPipe = class(TObject)
     public
@@ -213,7 +206,7 @@ type
   TConnectionParameters = class(TObject)
     strict private
       FNetType: TNetType;
-      FHostname, FUsername, FPassword, FAllDatabases, FComment, FStartupScriptFilename,
+      FHostname, FUsername, FPassword, FAllDatabases, FLibraryOrProvider, FComment, FStartupScriptFilename,
       FSessionPath, FSSLPrivateKey, FSSLCertificate, FSSLCACertificate, FSSLCipher, FServerVersion,
       FSSHHost, FSSHUser, FSSHPassword, FSSHPlinkExe, FSSHPrivateKey: String;
       FPort, FSSHPort, FSSHLocalPort, FSSHTimeout, FCounter, FQueryTimeout, FKeepAlive: Integer;
@@ -228,7 +221,7 @@ type
       constructor Create(SessionRegPath: String); overload;
       procedure SaveToRegistry;
       function CreateConnection(AOwner: TComponent): TDBConnection;
-      function CreateQuery(AOwner: TComponent): TDBQuery;
+      function CreateQuery(Connection: TDbConnection): TDBQuery;
       function NetTypeName(NetType: TNetType; LongFormat: Boolean): String;
       class function IsCompatibleToWin10S(NetType: TNetType): Boolean;
       function GetNetTypeGroup: TNetTypeGroup;
@@ -243,6 +236,7 @@ type
       function IsAzure: Boolean;
       function IsMemSQL: Boolean;
       property ImageIndex: Integer read GetImageIndex;
+      function DefaultLibrary: String;
       function DefaultPort: Integer;
       function DefaultUsername: String;
     published
@@ -263,6 +257,7 @@ type
       property WindowsAuth: Boolean read FWindowsAuth write FWindowsAuth;
       property CleartextPluginEnabled: Boolean read FCleartextPluginEnabled write FCleartextPluginEnabled;
       property AllDatabasesStr: String read FAllDatabases write FAllDatabases;
+      property LibraryOrProvider: String read FLibraryOrProvider write FLibraryOrProvider;
       property Comment: String read FComment write FComment;
       property StartupScriptFilename: String read FStartupScriptFilename write FStartupScriptFilename;
       property QueryTimeout: Integer read FQueryTimeout write FQueryTimeout;
@@ -339,6 +334,7 @@ type
       FResultCount: Integer;
       FStatementNum: Cardinal;
       FCurrentUserHostCombination: String;
+      FAllUserHostCombinations: TStringList;
       FLockedByThread: TThread;
       FQuoteChar: Char;
       FQuoteChars: String;
@@ -370,6 +366,7 @@ type
       function GetServerUptime: Integer;
       function GetServerNow: TDateTime;
       function GetCurrentUserHostCombination: String;
+      function GetAllUserHostCombinations: TStringList;
       function DecodeAPIString(a: AnsiString): String;
       function ExtractIdentifier(var SQL: String): String;
       function GetRowCount(Obj: TDBObject): Int64; virtual; abstract;
@@ -392,6 +389,7 @@ type
       function FindObject(DB, Obj: String): TDBObject;
       function escChars(const Text: String; EscChar, Char1, Char2, Char3, Char4: Char): String;
       function UnescapeString(Text: String): String;
+      function ExtractLiteral(var SQL: String; Prefix: String): String;
       function GetResults(SQL: String): TDBQuery;
       function GetCol(SQL: String; Column: Integer=0): TStringList;
       function GetVar(SQL: String; Column: Integer=0): String; overload;
@@ -402,11 +400,12 @@ type
       function DbObjectsCached(db: String): Boolean;
       function ParseDateTime(Str: String): TDateTime;
       function GetKeyColumns(Columns: TTableColumnList; Keys: TTableKeyList): TStringList;
-      function ConnectionInfo: TStringList;
+      function ConnectionInfo: TStringList; virtual;
       function GetLastResults: TDBQueryList; virtual; abstract;
       function GetCreateCode(Obj: TDBObject): String; virtual;
       procedure PrefetchCreateCode(Objects: TDBObjectList);
       function GetSessionVariables(Refresh: Boolean): TDBQuery;
+      function GetSessionVariable(VarName: String; DefaultValue: String=''; Refresh: Boolean=False): String;
       function MaxAllowedPacket: Int64; virtual; abstract;
       function GetSQLSpecifity(Specifity: TSQLSpecifityId): String;
       function ExplainAnalyzer(SQL, DatabaseName: String): Boolean; virtual;
@@ -453,6 +452,7 @@ type
       property InformationSchemaObjects: TStringList read GetInformationSchemaObjects;
       property ResultCount: Integer read FResultCount;
       property CurrentUserHostCombination: String read GetCurrentUserHostCombination;
+      property AllUserHostCombinations: TStringList read GetAllUserHostCombinations;
       property LockedByThread: TThread read FLockedByThread write SetLockedByThread;
       property Datatypes: TDBDataTypeArray read FDatatypes;
       property Favorites: TStringList read FFavorites;
@@ -477,11 +477,11 @@ type
   TMySQLConnection = class(TDBConnection)
     private
       FHandle: PMYSQL;
+      FLib: TMySQLLib;
       FLastRawResults: TMySQLRawResults;
       procedure SetActive(Value: Boolean); override;
       procedure DoBeforeConnect; override;
       procedure DoAfterConnect; override;
-      procedure AssignProc(var Proc: FARPROC; Name: PAnsiChar);
       function GetThreadId: Int64; override;
       function GetCharacterSet: String; override;
       procedure SetCharacterSet(CharsetName: String); override;
@@ -497,8 +497,10 @@ type
       procedure SetLockedByThread(Value: TThread); override;
     public
       constructor Create(AOwner: TComponent); override;
+      property Lib: TMySQLLib read FLib;
       procedure Query(SQL: String; DoStoreResult: Boolean=False; LogCategory: TDBLogCategory=lcSQL); override;
       function Ping(Reconnect: Boolean): Boolean; override;
+      function ConnectionInfo: TStringList; override;
       function GetLastResults: TDBQueryList; override;
       function GetCreateCode(Obj: TDBObject): String; override;
       property LastRawResults: TMySQLRawResults read FLastRawResults;
@@ -529,26 +531,23 @@ type
       destructor Destroy; override;
       procedure Query(SQL: String; DoStoreResult: Boolean=False; LogCategory: TDBLogCategory=lcSQL); override;
       function Ping(Reconnect: Boolean): Boolean; override;
+      function ConnectionInfo: TStringList; override;
       function GetLastResults: TDBQueryList; override;
       function MaxAllowedPacket: Int64; override;
       property LastRawResults: TAdoRawResults read FLastRawResults;
   end;
 
-  TPQConnectStatus = (CONNECTION_OK, CONNECTION_BAD, CONNECTION_STARTED, CONNECTION_MADE, CONNECTION_AWAITING_RESPONSE, CONNECTION_AUTH_OK, CONNECTION_SETENV, CONNECTION_SSL_STARTUP, CONNECTION_NEEDED);
-  PPGconn = Pointer;
-  PPGresult = Pointer;
-  POid = Integer;
   TPGRawResults = Array of PPGresult;
   TPQerrorfields = (PG_DIAG_SEVERITY, PG_DIAG_SQLSTATE, PG_DIAG_MESSAGE_PRIMARY, PG_DIAG_MESSAGE_DETAIL, PG_DIAG_MESSAGE_HINT, PG_DIAG_STATEMENT_POSITION, PG_DIAG_INTERNAL_POSITION, PG_DIAG_INTERNAL_QUERY, PG_DIAG_CONTEXT, PG_DIAG_SOURCE_FILE, PG_DIAG_SOURCE_LINE, PG_DIAG_SOURCE_FUNCTION);
   TPgConnection = class(TDBConnection)
     private
       FHandle: PPGconn;
+      FLib: TPostgreSQLLib;
       FLastRawResults: TPGRawResults;
       procedure SetActive(Value: Boolean); override;
       procedure DoBeforeConnect; override;
       function GetThreadId: Int64; override;
       procedure SetCharacterSet(CharsetName: String); override;
-      procedure AssignProc(var Proc: FARPROC; Name: PAnsiChar);
       function GetLastErrorCode: Cardinal; override;
       function GetLastErrorMsg: String; override;
       function GetAllDatabases: TStringList; override;
@@ -558,8 +557,10 @@ type
     public
       constructor Create(AOwner: TComponent); override;
       destructor Destroy; override;
+      property Lib: TPostgreSQLLib read FLib;
       procedure Query(SQL: String; DoStoreResult: Boolean=False; LogCategory: TDBLogCategory=lcSQL); override;
       function Ping(Reconnect: Boolean): Boolean; override;
+      function ConnectionInfo: TStringList; override;
       function GetLastResults: TDBQueryList; override;
       function MaxAllowedPacket: Int64; override;
       function GetRowCount(Obj: TDBObject): Int64; override;
@@ -649,9 +650,8 @@ type
       property ColumnOrgNames: TStringList read FColumnOrgNames write SetColumnOrgNames;
       property AutoIncrementColumn: Integer read FAutoIncrementColumn;
       property DBObject: TDBObject read FDBObject write SetDBObject;
-    published
       property SQL: String read FSQL write FSQL;
-      property Connection: TDBConnection read FConnection write FConnection;
+      property Connection: TDBConnection read FConnection;
   end;
   PDBQuery = ^TDBQuery;
 
@@ -659,11 +659,13 @@ type
 
   TMySQLQuery = class(TDBQuery)
     private
+      FConnection: TMySQLConnection;
       FResultList: TMySQLRawResults;
       FCurrentResults: PMYSQL_RES;
       FCurrentRow: PMYSQL_ROW;
       procedure SetRecNo(Value: Int64); override;
     public
+      constructor Create(AOwner: TComponent); override;
       destructor Destroy; override;
       procedure Execute(AddResult: Boolean=False; UseRawResult: Integer=-1); override;
       function GetColBinData(Column: Integer; var baData: TBytes): Boolean; override;
@@ -698,11 +700,13 @@ type
 
   TPGQuery = class(TDBQuery)
     private
+      FConnection: TPgConnection;
       FCurrentResults: PPGresult;
       FRecNoLocal: Integer;
       FResultList: TPGRawResults;
       procedure SetRecNo(Value: Int64); override;
     public
+      constructor Create(AOwner: TComponent); override;
       destructor Destroy; override;
       procedure Execute(AddResult: Boolean=False; UseRawResult: Integer=-1); override;
       function GetColBinData(Column: Integer; var baData: TBytes): Boolean; override;
@@ -729,74 +733,11 @@ exports
 
 {$I const.inc}
 
-var
-  LibMysqlPath: String;
-  LibMysqlHandle: HMODULE; // Shared module handle
 
-  mysql_affected_rows: function(Handle: PMYSQL): Int64; stdcall;
-  mysql_character_set_name: function(Handle: PMYSQL): PAnsiChar; stdcall;
-  mysql_close: procedure(Handle: PMYSQL); stdcall;
-  mysql_data_seek: procedure(Result: PMYSQL_RES; Offset: Int64); stdcall;
-  mysql_errno: function(Handle: PMYSQL): Cardinal; stdcall;
-  mysql_error: function(Handle: PMYSQL): PAnsiChar; stdcall;
-  mysql_fetch_field_direct: function(Result: PMYSQL_RES; FieldNo: Cardinal): PMYSQL_FIELD; stdcall;
-  mysql_fetch_lengths: function(Result: PMYSQL_RES): PLongInt; stdcall;
-  mysql_fetch_row: function(Result: PMYSQL_RES): PMYSQL_ROW; stdcall;
-  mysql_free_result: procedure(Result: PMYSQL_RES); stdcall;
-  mysql_get_client_info: function: PAnsiChar; stdcall;
-  mysql_get_server_info: function(Handle: PMYSQL): PAnsiChar; stdcall;
-  mysql_init: function(Handle: PMYSQL): PMYSQL; stdcall;
-  mysql_num_fields: function(Result: PMYSQL_RES): Integer; stdcall;
-  mysql_num_rows: function(Result: PMYSQL_RES): Int64; stdcall;
-  mysql_options: function(Handle: PMYSQL; Option: Integer; arg: PAnsiChar): Integer; stdcall;
-  mysql_ping: function(Handle: PMYSQL): Integer; stdcall;
-  mysql_real_connect: function(Handle: PMYSQL; const Host, User, Passwd, Db: PAnsiChar; Port: Cardinal; const UnixSocket: PAnsiChar; ClientFlag: Cardinal): PMYSQL; stdcall;
-  mysql_real_query: function(Handle: PMYSQL; const Query: PAnsiChar; Length: Cardinal): Integer; stdcall;
-  mysql_ssl_set: function(Handle: PMYSQL; const key, cert, CA, CApath, cipher: PAnsiChar): Byte; stdcall;
-  mysql_stat: function(Handle: PMYSQL): PAnsiChar; stdcall;
-  mysql_store_result: function(Handle: PMYSQL): PMYSQL_RES; stdcall;
-  mysql_thread_id: function(Handle: PMYSQL): Cardinal; stdcall;
-  mysql_next_result: function(Handle: PMYSQL): Integer; stdcall;
-  mysql_set_character_set: function(Handle: PMYSQL; csname: PAnsiChar): Integer; stdcall;
-  mysql_thread_init: function: Byte; stdcall;
-  mysql_thread_end: procedure; stdcall;
-  mysql_warning_count: function(Handle: PMYSQL): Cardinal; stdcall;
-
-  LibPqPath: String = 'libpq.dll';
-  LibPqHandle: HMODULE;
-  PQconnectdb: function(const ConnInfo: PAnsiChar): PPGconn cdecl;
-  PQerrorMessage: function(const Handle: PPGconn): PAnsiChar cdecl;
-  PQresultErrorMessage: function(const Result: PPGresult): PAnsiChar cdecl;
-  PQresultErrorField: function(const Result: PPGresult; fieldcode: Integer): PAnsiChar;
-  PQfinish: procedure(const Handle: PPGconn);
-  PQstatus: function(const Handle: PPGconn): TPQConnectStatus cdecl;
-  PQsendQuery: function(const Handle: PPGconn; command: PAnsiChar): Integer cdecl;
-  PQgetResult: function(const Handle: PPGconn): PPGresult cdecl;
-  PQbackendPID: function(const Handle: PPGconn): Integer cdecl;
-  PQcmdTuples: function(Result: PPGresult): PAnsiChar; cdecl;
-  PQntuples: function(Result: PPGresult): Integer; cdecl;
-  PQclear: procedure(Result: PPGresult); cdecl;
-  PQnfields: function(Result: PPGresult): Integer; cdecl;
-  PQfname: function(const Result: PPGresult; column_number: Integer): PAnsiChar; cdecl;
-  PQftype: function(const Result: PPGresult; column_number: Integer): POid; cdecl;
-  PQftable: function(const Result: PPGresult; column_number: Integer): POid; cdecl;
-  PQgetvalue: function(const Result: PPGresult; row_number: Integer; column_number: Integer): PAnsiChar; cdecl;
-  PQgetlength: function(const Result: PPGresult; row_number: Integer; column_number: Integer): Integer; cdecl;
-  PQgetisnull: function(const Result: PPGresult; row_number: Integer; column_number: Integer): Integer; cdecl;
-  PQlibVersion: function(): Integer; cdecl;
 
 implementation
 
 uses apphelpers, loginform, change_password;
-
-
-{ EDatabaseError }
-
-constructor EDatabaseError.Create(const Msg: string; const ErrorCode: Cardinal=0);
-begin
-  Self.ErrorCode := ErrorCode;
-  inherited Create(Msg);
-end;
 
 
 
@@ -821,7 +762,7 @@ begin
       DUPLICATE_CLOSE_SOURCE OR DUPLICATE_SAME_ACCESS
     );
   if not Success then
-    raise EDatabaseError.Create(_('Error creating I/O pipes'));
+    raise EDbError.Create(_('Error creating I/O pipes'));
 end;
 
 
@@ -873,7 +814,7 @@ begin
   while not PortOpen(FConnection.Parameters.SSHLocalPort) do begin
     Inc(PortChecks);
     if PortChecks >= 20 then
-      raise EDatabaseError.CreateFmt(_('Could not execute PLink: Port %d already in use.'), [FConnection.Parameters.SSHLocalPort]);
+      raise EDbError.CreateFmt(_('Could not execute PLink: Port %d already in use.'), [FConnection.Parameters.SSHLocalPort]);
     FConnection.Log(lcInfo, f_('Port #%d in use. Checking if #%d is available...', [FConnection.Parameters.SSHLocalPort, FConnection.Parameters.SSHLocalPort+1]));
     FConnection.Parameters.SSHLocalPort := FConnection.Parameters.SSHLocalPort + 1;
   end;
@@ -881,14 +822,16 @@ begin
   // Build plink.exe command line
   // plink bob@domain.com -pw myPassw0rd1 -P 22 -i "keyfile.pem" -L 55555:localhost:3306
   PlinkCmd := FConnection.Parameters.SSHPlinkExe + ' -ssh ';
-  if FConnection.Parameters.SSHUser <> '' then
-    PlinkCmd := PlinkCmd + FConnection.Parameters.SSHUser + '@';
-  if FConnection.Parameters.SSHHost <> '' then
-    PlinkCmd := PlinkCmd + FConnection.Parameters.SSHHost
+  if FConnection.Parameters.SSHUser.Trim <> '' then
+    PlinkCmd := PlinkCmd + FConnection.Parameters.SSHUser.Trim + '@';
+  if FConnection.Parameters.SSHHost.Trim <> '' then
+    PlinkCmd := PlinkCmd + FConnection.Parameters.SSHHost.Trim
   else
     PlinkCmd := PlinkCmd + FConnection.Parameters.Hostname;
-  if FConnection.Parameters.SSHPassword <> '' then
-    PlinkCmd := PlinkCmd + ' -pw "' + FConnection.Parameters.SSHPassword + '"';
+  if FConnection.Parameters.SSHPassword <> '' then begin
+    // Escape double quote with backslash, see issue #261
+    PlinkCmd := PlinkCmd + ' -pw "' + StringReplace(FConnection.Parameters.SSHPassword, '"', '\"', [rfReplaceAll]) + '"';
+  end;
   if FConnection.Parameters.SSHPort > 0 then
     PlinkCmd := PlinkCmd + ' -P ' + IntToStr(FConnection.Parameters.SSHPort);
   if FConnection.Parameters.SSHPrivateKey <> '' then
@@ -922,7 +865,7 @@ begin
        PChar(GetCurrentDir),
        StartupInfo,
        FProcessInfo) then begin
-    raise EDatabaseError.CreateFmt(_('Could not execute PLink: %s'), [CRLF+PlinkCmdDisplay]);
+    raise EDbError.CreateFmt(_('Could not execute PLink: %s'), [CRLF+PlinkCmdDisplay]);
   end;
 
   // Wait until timeout has finished, or some text returned.
@@ -934,7 +877,7 @@ begin
     WaitForSingleObject(FProcessInfo.hProcess, 200);
     GetExitCodeProcess(FProcessInfo.hProcess, ExitCode);
     if ExitCode <> STILL_ACTIVE then
-      raise EDatabaseError.CreateFmt(_('PLink exited unexpected. Command line was: %s'), [CRLF+PlinkCmdDisplay]);
+      raise EDbError.CreateFmt(_('PLink exited unexpected. Command line was: %s'), [CRLF+PlinkCmdDisplay]);
 
     OutText := Trim(ReadPipe(FOutPipe));
     ErrorText := ReadPipe(FErrorPipe);
@@ -973,7 +916,7 @@ begin
             SendText('n');
           mrCancel: begin
             Destroy;
-            raise EDatabaseError.Create(_('PLink cancelled'));
+            raise EDbError.Create(_('PLink cancelled'));
           end;
         end;
       end else if ErrorText.StartsWith('Using username ', True) then begin
@@ -1004,7 +947,7 @@ var
 begin
   Result := '';
   if Pipe.ReadHandle = INVALID_HANDLE_VALUE then
-    raise EDatabaseError.Create(_('Error reading I/O pipes'));
+    raise EDbError.Create(_('Error reading I/O pipes'));
 
   // Check if there is data to read from stdout
   PeekNamedPipe(Pipe.ReadHandle, nil, 0, nil, @BufferReadCount, nil);
@@ -1135,6 +1078,7 @@ begin
   FPort := DefaultPort;
   FCompressed := AppSettings.GetDefaultBool(asCompressed);
   FAllDatabases := AppSettings.GetDefaultString(asDatabases);
+  FLibraryOrProvider := DefaultLibrary;
   FComment := AppSettings.GetDefaultString(asComment);
 
   FSSHHost := AppSettings.GetDefaultString(asSSHtunnelHost);
@@ -1201,6 +1145,7 @@ begin
     FPort := MakeInt(AppSettings.ReadString(asPort));
     FCompressed := AppSettings.ReadBool(asCompressed);
     FAllDatabases := AppSettings.ReadString(asDatabases);
+    FLibraryOrProvider := AppSettings.ReadString(asLibrary);
     FComment := AppSettings.ReadString(asComment);
 
     FSSHHost := AppSettings.ReadString(asSSHtunnelHost);
@@ -1265,6 +1210,7 @@ begin
     AppSettings.WriteInt(asKeepAlive, FKeepAlive);
     AppSettings.WriteBool(asFullTableStatus, FFullTableStatus);
     AppSettings.WriteString(asDatabases, FAllDatabases);
+    AppSettings.WriteString(asLibrary, FLibraryOrProvider);
     AppSettings.WriteString(asComment, FComment);
     AppSettings.WriteString(asStartupScriptFilename, FStartupScriptFilename);
     AppSettings.WriteInt(asTreeBackground, FSessionColor);
@@ -1302,15 +1248,15 @@ begin
 end;
 
 
-function TConnectionParameters.CreateQuery(AOwner: TComponent): TDBQuery;
+function TConnectionParameters.CreateQuery(Connection: TDbConnection): TDBQuery;
 begin
   case NetTypeGroup of
     ngMySQL:
-      Result := TMySQLQuery.Create(AOwner);
+      Result := TMySQLQuery.Create(Connection);
     ngMSSQL:
-      Result := TAdoDBQuery.Create(AOwner);
+      Result := TAdoDBQuery.Create(Connection);
     ngPgSQL:
-      Result := TPGQuery.Create(AOwner);
+      Result := TPGQuery.Create(Connection);
     else
       raise Exception.CreateFmt(_(MsgUnhandledNetType), [Integer(FNetType)]);
   end;
@@ -1383,8 +1329,12 @@ begin
       Result := ngMSSQL;
     ntPgSQL_TCPIP, ntPgSQL_SSHtunnel:
       Result := ngPgSQL;
-    else
-      raise Exception.CreateFmt(_(MsgUnhandledNetType), [Integer(FNetType)]);
+    else begin
+      // Return default net group here. Raising an exception lets the app die for some reason.
+      // Reproduction: click drop-down button on "Database(s)" session setting
+      //raise EDbError.CreateFmt(_(MsgUnhandledNetType), [Integer(FNetType)]);
+      Result := ngMySQL;
+    end;
   end;
 end;
 
@@ -1490,6 +1440,17 @@ begin
     ngMySQL: Result := 'root';
     ngMSSQL: Result := 'sa';
     ngPgSQL: Result := 'postgres';
+    else Result := '';
+  end;
+end;
+
+
+function TConnectionParameters.DefaultLibrary: String;
+begin
+  case NetTypeGroup of
+    ngMySQL: Result := 'libmariadb.dll';
+    ngMSSQL: Result := 'MSOLEDBSQL'; // Prefer MSOLEDBSQL provider on newer systems
+    ngPgSQL: Result := 'libpq.dll';
     else Result := '';
   end;
 end;
@@ -1682,38 +1643,6 @@ begin
 end;
 
 
-procedure TMySQLConnection.AssignProc(var Proc: FARPROC; Name: PAnsiChar);
-var
-  ClientVersion: String;
-begin
-  // Map library procedure to internal procedure
-  Log(lcDebug, f_('Assign procedure "%s"', [Name]));
-  Proc := GetProcAddress(LibMysqlHandle, Name);
-  if Proc = nil then begin
-    if @mysql_get_client_info = nil then
-      mysql_get_client_info := GetProcAddress(LibMysqlHandle, 'mysql_get_client_info');
-    ClientVersion := '';
-    if @mysql_get_client_info <> nil then
-      ClientVersion := ' ('+DecodeApiString(mysql_get_client_info)+')';
-    LibMysqlHandle := 0;
-    raise EDatabaseError.Create(f_('Your %s is out-dated or somehow incompatible to %s. Please use the one from the installer, or just reinstall %s.', [LibMysqlPath+ClientVersion, APPNAME, APPNAME]));
-  end;
-end;
-
-
-procedure TPgConnection.AssignProc(var Proc: FARPROC; Name: PAnsiChar);
-begin
-  // Map library procedure to internal procedure
-  Log(lcDebug, f_('Assign procedure "%s"', [Name]));
-  Proc := GetProcAddress(LibPqHandle, Name);
-  if Proc = nil then begin
-    LibPqHandle := 0;
-    Log(lcDebug, f_('Library error in %s: Could not find procedure address for "%s"', [LibPqPath, Name]));
-    raise EDatabaseError.Create(f_('Your %s is out-dated or somehow incompatible to %s. Please use the one from the installer, or just reinstall %s.', [LibPqPath, APPNAME, APPNAME]));
-  end;
-end;
-
-
 procedure TDBConnection.SetLockedByThread(Value: TThread);
 begin
   FLockedByThread := Value;
@@ -1727,9 +1656,9 @@ begin
       // We're running in a thread already. Ensure that Log() is able to detect that.
       FLockedByThread := Value;
       Log(lcDebug, 'mysql_thread_init, thread id #'+IntToStr(Value.ThreadID));
-      mysql_thread_init;
+      FLib.mysql_thread_init;
     end else begin
-      mysql_thread_end;
+      FLib.mysql_thread_end;
       Log(lcDebug, 'mysql_thread_end, thread id #'+IntToStr(FLockedByThread.ThreadID));
       FLockedByThread := Value;
     end;
@@ -1747,7 +1676,7 @@ var
   Error, tmpdb, FinalHost, FinalSocket, StatusName: String;
   sslca, sslkey, sslcert, sslcipher: PAnsiChar;
   PluginDir: AnsiString;
-  Vars, Status: TDBQuery;
+  Status: TDBQuery;
   PasswordChangeDialog: TfrmPasswordChange;
   SetOptionResult: Integer;
 begin
@@ -1755,13 +1684,13 @@ begin
 
     // Die if trying to run plink on Win10S
     if RunningOnWindows10S and (not FParameters.IsCompatibleToWin10S(FParameters.NetType)) then begin
-      raise EDatabaseError.Create(_('The network type defined for this session is not compatible to your Windows 10 S'));
+      raise EDbError.Create(_('The network type defined for this session is not compatible to your Windows 10 S'));
     end;
 
     DoBeforeConnect;
 
     // Get handle
-    FHandle := mysql_init(nil);
+    FHandle := FLib.mysql_init(nil);
 
     // Prepare special stuff for SSL and SSH tunnel
     FinalHost := FParameters.Hostname;
@@ -1783,7 +1712,7 @@ begin
       if FParameters.SSLCipher <> '' then
         sslcipher := PAnsiChar(AnsiString(FParameters.SSLCipher));
       { TODO : Use Cipher and CAPath parameters }
-      mysql_ssl_set(FHandle,
+      FLib.mysql_ssl_set(FHandle,
         sslkey,
         sslcert,
         sslca,
@@ -1819,22 +1748,26 @@ begin
 
     // Point libmysql to the folder with client plugins
     PluginDir := AnsiString(ExtractFilePath(ParamStr(0))+'plugins');
-    SetOptionResult := mysql_options(FHandle, Integer(MYSQL_PLUGIN_DIR), PAnsiChar(PluginDir));
+    SetOptionResult := FLib.mysql_options(FHandle, Integer(MYSQL_PLUGIN_DIR), PAnsiChar(PluginDir));
     if SetOptionResult <> 0 then begin
-      raise EDatabaseError.Create(f_('Plugin directory %s could not be set.', [PluginDir]));
+      raise EDbError.Create(f_('Plugin directory %s could not be set.', [PluginDir]));
     end;
 
     // Define which TLS protocol versions are allowed.
     // See https://www.heidisql.com/forum.php?t=27158
     // See https://mariadb.com/kb/en/library/mysql_optionsv/
-    mysql_options(FHandle, Integer(MARIADB_OPT_TLS_VERSION), PAnsiChar('TLSv1,TLSv1.1,TLSv1.2,TLSv1.3'));
-    mysql_options(FHandle, Integer(MYSQL_OPT_TLS_VERSION), PAnsiChar('TLSv1,TLSv1.1,TLSv1.2,TLSv1.3'));
+    FLib.mysql_options(FHandle, Integer(MARIADB_OPT_TLS_VERSION), PAnsiChar('TLSv1,TLSv1.1,TLSv1.2,TLSv1.3'));
+    FLib.mysql_options(FHandle, Integer(MYSQL_OPT_TLS_VERSION), PAnsiChar('TLSv1,TLSv1.1,TLSv1.2,TLSv1.3'));
 
     // Enable cleartext plugin
     if Parameters.CleartextPluginEnabled then
-      mysql_options(FHandle, Integer(MYSQL_ENABLE_CLEARTEXT_PLUGIN), PAnsiChar('1'));
+      FLib.mysql_options(FHandle, Integer(MYSQL_ENABLE_CLEARTEXT_PLUGIN), PAnsiChar('1'));
 
-    Connected := mysql_real_connect(
+    // Tell server who we are
+    if Assigned(FLib.mysql_optionsv) then
+      FLib.mysql_optionsv(FHandle, Integer(MYSQL_OPT_CONNECT_ATTR_ADD), 'program_name', APPNAME);
+
+    Connected := FLib.mysql_real_connect(
       FHandle,
       PAnsiChar(Utf8Encode(FinalHost)),
       PAnsiChar(Utf8Encode(FParameters.Username)),
@@ -1851,14 +1784,14 @@ begin
       FHandle := nil;
       if FPlink <> nil then
         FPlink.Free;
-      raise EDatabaseError.Create(Error);
+      raise EDbError.Create(Error);
     end else begin
       FActive := True;
       // Catch late init_connect error by firing mysql_ping(), which detects a broken
       // connection without running into some access violation. See issue #3464.
       Ping(False);
       if not FActive then
-        raise EDatabaseError.CreateFmt(_('Connection closed immediately after it was established. '+
+        raise EDbError.CreateFmt(_('Connection closed immediately after it was established. '+
           'This is mostly caused by an "%s" server variable which has errors in itself, '+
           'or your user account does not have the required privileges for it to run.'+CRLF+CRLF+
           'You may ask someone with SUPER privileges'+CRLF+
@@ -1870,7 +1803,7 @@ begin
       try
         ThreadId;
       except
-        on E:EDatabaseError do begin
+        on E:EDbError do begin
           if GetLastErrorCode =  1820 then begin
             PasswordChangeDialog := TfrmPasswordChange.Create(Self);
             PasswordChangeDialog.lblHeading.Caption := GetLastErrorMsg;
@@ -1891,11 +1824,11 @@ begin
       try
         CharacterSet := 'utf8mb4';
       except
-        on E:EDatabaseError do try
+        on E:EDbError do try
           Log(lcError, E.Message);
           CharacterSet := 'utf8';
         except
-          on E:EDatabaseError do
+          on E:EDbError do
             Log(lcError, E.Message);
         end;
       end;
@@ -1912,19 +1845,14 @@ begin
         Status.Next;
       end;
       FServerDateTimeOnStartup := GetVar('SELECT NOW()');
-      FServerVersionUntouched := DecodeAPIString(mysql_get_server_info(FHandle));
-      Vars := GetSessionVariables(False);
-      while not Vars.Eof do begin
-        if Vars.Col(0) = 'version_compile_os' then
-          FServerOS := Vars.Col(1);
-        if Vars.Col(0) = 'hostname' then
-          FRealHostname := Vars.Col(1);
-        if (Vars.Col(0) = 'version') and (Vars.Col(1) <> '') then
-          FServerVersionUntouched := Vars.Col(1);
-        if (Vars.Col(0) = 'version_comment') and (Vars.Col(1) <> '') then
-          FServerVersionUntouched := FServerVersionUntouched + ' - ' + Vars.Col(1);
-        Vars.Next;
+      FServerOS := GetSessionVariable('version_compile_os');
+      FRealHostname := GetSessionVariable('hostname');
+      FServerVersionUntouched := GetSessionVariable('version') + ' - ' + GetSessionVariable('version_comment');
+      FServerVersionUntouched := FServerVersionUntouched.Trim([' ', '-']);
+      if FServerVersionUntouched.IsEmpty then begin
+        FServerVersionUntouched := DecodeAPIString(FLib.mysql_get_server_info(FHandle));
       end;
+
       if FDatabase <> '' then begin
         tmpdb := FDatabase;
         FDatabase := '';
@@ -1941,7 +1869,7 @@ begin
   end
 
   else if (not Value) and (FHandle <> nil) then begin
-    mysql_close(FHandle);
+    FLib.mysql_close(FHandle);
     FActive := False;
     ClearCache(False);
     FConnectionStarted := 0;
@@ -1956,11 +1884,10 @@ end;
 
 procedure TAdoDBConnection.SetActive(Value: Boolean);
 var
-  tmpdb, Error, Provider, NetLib, DataSource, QuotedPassword, ServerVersion: String;
+  tmpdb, Error, NetLib, DataSource, QuotedPassword, ServerVersion: String;
   rx: TRegExpr;
   i: Integer;
-  Providers: TStringList;
-  HasNewProvider: Boolean;
+  IsOldProvider: Boolean;
 begin
   if Value then begin
     DoBeforeConnect;
@@ -1969,7 +1896,7 @@ begin
       FAdoHandle := TAdoConnection.Create(Owner);
     except
       on E:Exception do
-        raise EDatabaseError.Create(E.Message+CRLF+CRLF+
+        raise EDbError.Create(E.Message+CRLF+CRLF+
             _('On Wine, you can try to install MDAC:')+CRLF+
             '> wget http://winetricks.org/winetricks'+CRLF+
             '> chmod +x winetricks'+CRLF+
@@ -1977,17 +1904,14 @@ begin
             '> sh winetricks native_mdac');
     end;
 
-    // Prefer MSOLEDBSQL provider on newer systems
-    Providers := TStringList.Create;
-    GetProviderNames(Providers);
-    HasNewProvider := Providers.IndexOf('MSOLEDBSQL') >= 0;
-    Providers.Free;
-    if HasNewProvider then begin
-      Provider := 'MSOLEDBSQL';
-    end else begin
-      Provider := 'SQLOLEDB';
-      Log(lcInfo, 'Security issue: Using '+Provider+' ADO provider with insecure TLS 1.0. '+
-        'You should install Microsoft OLE DB Driver from https://www.microsoft.com/en-us/download/confirmation.aspx?id=56730');
+    IsOldProvider := Parameters.LibraryOrProvider = 'SQLOLEDB';
+    if IsOldProvider then begin
+      MessageDialog(
+        f_('Security issue: Using %s %s with insecure %s.',
+          [Parameters.LibraryOrProvider, 'ADO provider', 'TLS 1.0']) +
+        f_('You should install %s from %s',
+          ['Microsoft OLE DB Driver', 'https://www.microsoft.com/en-us/download/confirmation.aspx?id=56730']),
+        mtWarning, [mbOK]);
     end;
 
     NetLib := '';
@@ -2010,7 +1934,7 @@ begin
     else
       QuotedPassword := '"'+Parameters.Password+'"';
 
-    FAdoHandle.ConnectionString := 'Provider='+Provider+';'+
+    FAdoHandle.ConnectionString := 'Provider='+Parameters.LibraryOrProvider+';'+
       'Password='+QuotedPassword+';'+
       'Persist Security Info=True;'+
       'User ID='+Parameters.Username+';'+
@@ -2024,10 +1948,10 @@ begin
       FAdoHandle.ConnectionString := FAdoHandle.ConnectionString + 'Database='+Parameters.AllDatabasesStr+';';
 
     if Parameters.WindowsAuth then begin
-      if HasNewProvider then
-        FAdoHandle.ConnectionString := FAdoHandle.ConnectionString + 'Trusted_Connection=yes;'
-      else
+      if IsOldProvider then
         FAdoHandle.ConnectionString := FAdoHandle.ConnectionString + 'Integrated Security=SSPI;'
+      else
+        FAdoHandle.ConnectionString := FAdoHandle.ConnectionString + 'Trusted_Connection=yes;'
     end;
 
     try
@@ -2104,7 +2028,7 @@ begin
         Error := LastErrorMsg;
         Log(lcError, Error);
         FConnectionStarted := 0;
-        raise EDatabaseError.Create(Error);
+        raise EDbError.Create(Error);
       end;
     end;
   end else begin
@@ -2151,16 +2075,32 @@ begin
       'password='''+FParameters.Password+''' '+
       'dbname='''+dbname+''' '+
       'application_name='''+APPNAME+'''';
-    FHandle := PQconnectdb(PAnsiChar(AnsiString(ConnInfo)));
-    if PQstatus(FHandle) = CONNECTION_BAD then begin
+    if FParameters.WantSSL then begin
+      ConnInfo := ConnInfo + ' sslmode=''require''';
+      if FParameters.SSLPrivateKey <> '' then
+        ConnInfo := ConnInfo + ' sslkey='''+FParameters.SSLPrivateKey+'''';
+      if FParameters.SSLCertificate <> '' then
+        ConnInfo := ConnInfo + ' sslcert='''+FParameters.SSLCertificate+'''';
+      if FParameters.SSLCACertificate <> '' then
+        ConnInfo := ConnInfo + ' sslrootcert='''+FParameters.SSLCACertificate+'''';
+      //if FParameters.SSLCipher <> '' then ??
+    end;
+
+
+    FHandle := FLib.PQconnectdb(PAnsiChar(AnsiString(ConnInfo)));
+    if FLib.PQstatus(FHandle) = CONNECTION_BAD then begin
       Error := LastErrorMsg;
       Log(lcError, Error);
       FConnectionStarted := 0;
-      PQfinish(FHandle); // free the memory
+      try
+        FLib.PQfinish(FHandle); // free the memory
+      except
+        on E:EAccessViolation do;
+      end;
       FHandle := nil;
       if FPlink <> nil then
         FPlink.Free;
-      raise EDatabaseError.Create(Error);
+      raise EDbError.Create(Error);
     end;
     FActive := True;
     FServerDateTimeOnStartup := GetVar('SELECT NOW()');
@@ -2189,7 +2129,7 @@ begin
     end;
   end else begin
     try
-      PQfinish(FHandle);
+      FLib.PQfinish(FHandle);
     except
       on E:EAccessViolation do;
     end;
@@ -2288,125 +2228,39 @@ end;
 
 procedure TMySQLConnection.DoBeforeConnect;
 var
-  msg,
-  TryLibraryPath: String;
-  OldErrorMode: Cardinal;
-  TryLibraryPaths: TStringList;
+  LibraryPath: String;
 begin
   // Init libmysql before actually connecting.
-  if LibMysqlHandle = 0 then begin
-
-    // Try newer libmariadb version at first, and fall back to libmysql,
-    // then fall back to dlls somewhere else on the users harddisk
-    TryLibraryPaths := TStringList.Create;
-    TryLibraryPaths.Add(ExtractFilePath(Application.ExeName) + 'libmariadb.dll');
-    TryLibraryPaths.Add(ExtractFilePath(Application.ExeName) + 'libmysql.dll');
-    TryLibraryPaths.Add('libmariadb.dll');
-    TryLibraryPaths.Add('libmysql.dll');
-
-    for TryLibraryPath in TryLibraryPaths do begin
-      Log(lcDebug, f_('Loading library file %s ...', [TryLibraryPath]));
-      // Temporarily suppress error popups while loading new library on Windows XP, see #79
-      OldErrorMode := SetErrorMode(SEM_FAILCRITICALERRORS);
-      SetErrorMode(OldErrorMode or SEM_FAILCRITICALERRORS);
-      LibMysqlHandle := LoadLibrary(PWideChar(TryLibraryPath));
-      SetErrorMode(OldErrorMode);
-      if LibMysqlHandle = 0 then begin
-        // Win XP needs libmysql.dll
-        Log(lcDebug, f_('Could not load %s', [TryLibraryPath]));
-      end else begin
-        LibMysqlPath := TryLibraryPath;
-        Break;
-      end;
-    end;
-    if LibMysqlHandle = 0 then begin
-      msg := f_('Cannot find a usable %s. Please launch %s from the directory where you have installed it.',
-        [ExtractFileName(TryLibraryPaths[0]), ExtractFileName(ParamStr(0))]
-        );
-      if Windows.GetLastError <> 0 then
-        msg := msg + CRLF + CRLF + f_('Internal error %d:', [Windows.GetLastError]) + ' ' + SysErrorMessage(Windows.GetLastError);
-      raise EDatabaseError.Create(msg);
-    end
-    else begin
-      AssignProc(@mysql_affected_rows, 'mysql_affected_rows');
-      AssignProc(@mysql_character_set_name, 'mysql_character_set_name');
-      AssignProc(@mysql_close, 'mysql_close');
-      AssignProc(@mysql_data_seek, 'mysql_data_seek');
-      AssignProc(@mysql_errno, 'mysql_errno');
-      AssignProc(@mysql_error, 'mysql_error');
-      AssignProc(@mysql_fetch_field_direct, 'mysql_fetch_field_direct');
-      AssignProc(@mysql_fetch_lengths, 'mysql_fetch_lengths');
-      AssignProc(@mysql_fetch_row, 'mysql_fetch_row');
-      AssignProc(@mysql_free_result, 'mysql_free_result');
-      AssignProc(@mysql_get_client_info, 'mysql_get_client_info');
-      AssignProc(@mysql_get_server_info, 'mysql_get_server_info');
-      AssignProc(@mysql_init, 'mysql_init');
-      AssignProc(@mysql_num_fields, 'mysql_num_fields');
-      AssignProc(@mysql_num_rows, 'mysql_num_rows');
-      AssignProc(@mysql_ping, 'mysql_ping');
-      AssignProc(@mysql_options, 'mysql_options');
-      AssignProc(@mysql_real_connect, 'mysql_real_connect');
-      AssignProc(@mysql_real_query, 'mysql_real_query');
-      AssignProc(@mysql_ssl_set, 'mysql_ssl_set');
-      AssignProc(@mysql_stat, 'mysql_stat');
-      AssignProc(@mysql_store_result, 'mysql_store_result');
-      AssignProc(@mysql_thread_id, 'mysql_thread_id');
-      AssignProc(@mysql_next_result, 'mysql_next_result');
-      AssignProc(@mysql_set_character_set, 'mysql_set_character_set');
-      AssignProc(@mysql_thread_init, 'mysql_thread_init');
-      AssignProc(@mysql_thread_end, 'mysql_thread_end');
-      AssignProc(@mysql_warning_count, 'mysql_warning_count');
-      Log(lcDebug, LibMysqlPath + ' v' + DecodeApiString(mysql_get_client_info) + ' loaded.');
-    end;
-  end;
+  LibraryPath := ExtractFilePath(ParamStr(0)) + Parameters.LibraryOrProvider;
+  Log(lcDebug, f_('Loading library file %s ...', [LibraryPath]));
+  // Throws EDbError on any failure:
+  FLib := TMySQLLib.Create(LibraryPath);
+  Log(lcDebug, FLib.DllFile + ' v' + DecodeApiString(FLib.mysql_get_client_info) + ' loaded.');
   inherited;
 end;
 
 
 procedure TPgConnection.DoBeforeConnect;
 var
-  LibWithPath, msg: String;
+  LibraryPath,
+  msg: String;
 begin
   // Init lib before actually connecting.
-  // Each connection has its own library handle
-  if LibPqHandle = 0 then begin
-    Log(lcDebug, f_('Loading library file %s ...', [LibPqPath]));
-    LibPqHandle := LoadLibrary(PWideChar(LibPqPath));
-    if LibPqHandle = 0 then begin
-      // Try with explicit file path if the path-less did not succeed. See http://www.heidisql.com/forum.php?t=22514
-      LibWithPath := ExtractFileDir(Application.ExeName) + '\' + LibPqPath;
-      Log(lcInfo, f_('Trying to load library with full path: %s', [LibWithPath]));
-      LibPqHandle := LoadLibrary(PWideChar(LibWithPath));
-    end;
-    if LibPqHandle = 0 then begin
-      msg := f_('Cannot find a usable %s. Please launch %s from the directory where you have installed it.', [LibPqPath, ExtractFileName(ParamStr(0))]);
-      if Windows.GetLastError <> 0 then
-        msg := msg + CRLF + CRLF + f_('Internal error %d:', [Windows.GetLastError]) + ' ' + SysErrorMessage(Windows.GetLastError);
-      raise EDatabaseError.Create(msg);
-    end
-    else begin
-      AssignProc(@PQconnectdb, 'PQconnectdb');
-      AssignProc(@PQerrorMessage, 'PQerrorMessage');
-      AssignProc(@PQresultErrorMessage, 'PQresultErrorMessage');
-      AssignProc(@PQresultErrorField, 'PQresultErrorField');
-      AssignProc(@PQfinish, 'PQfinish');
-      AssignProc(@PQstatus, 'PQstatus');
-      AssignProc(@PQsendQuery, 'PQsendQuery');
-      AssignProc(@PQgetResult, 'PQgetResult');
-      AssignProc(@PQbackendPID, 'PQbackendPID');
-      AssignProc(@PQcmdTuples, 'PQcmdTuples');
-      AssignProc(@PQntuples, 'PQntuples');
-      AssignProc(@PQclear, 'PQclear');
-      AssignProc(@PQnfields, 'PQnfields');
-      AssignProc(@PQfname, 'PQfname');
-      AssignProc(@PQftype, 'PQftype');
-      AssignProc(@PQftable, 'PQftable');
-      AssignProc(@PQgetvalue, 'PQgetvalue');
-      AssignProc(@PQgetlength, 'PQgetlength');
-      AssignProc(@PQgetisnull, 'PQgetisnull');
-      AssignProc(@PQlibVersion, 'PQlibVersion');
-
-      Log(lcDebug, LibPqPath + ' v' + IntToStr(PQlibVersion) + ' loaded.');
+  LibraryPath := ExtractFilePath(ParamStr(0)) + Parameters.LibraryOrProvider;
+  Log(lcDebug, f_('Loading library file %s ...', [LibraryPath]));
+  try
+    FLib := TPostgreSQLLib.Create(LibraryPath);
+    Log(lcDebug, FLib.DllFile + ' v' + IntToStr(FLib.PQlibVersion) + ' loaded.');
+  except
+    on E:EDbError do begin
+      msg := E.Message;
+      if E.ErrorCode = TDbLib.LIB_PROC_ERROR then begin
+        msg := msg + sLineBreak + sLineBreak +
+          f_('Installing %s might help. Please download from %s',
+            ['VC Redistributable', 'https://support.microsoft.com/en-us/help/3179560/update-for-visual-c-2013-and-visual-c-redistributable-package']
+            );
+      end;
+      raise EDbError.Create(msg, E.ErrorCode);
     end;
   end;
   inherited;
@@ -2503,7 +2357,7 @@ begin
   Log(lcDebug, 'Ping server ...');
   IsDead := True;
   try
-    IsDead := (FHandle=nil) or (mysql_ping(FHandle) <> 0);
+    IsDead := (FHandle=nil) or (FLib.mysql_ping(FHandle) <> 0);
   except
     // silence dumb exceptions from mysql_ping
     on E:Exception do
@@ -2554,12 +2408,12 @@ begin
   if FActive then begin
     IsBroken := FHandle = nil;
     if not IsBroken then begin
-      PingStatus := PQsendQuery(FHandle, PAnsiChar(''));
+      PingStatus := FLib.PQsendQuery(FHandle, PAnsiChar(''));
       IsBroken := PingStatus <> 1;
-      PingResult := PQgetResult(FHandle);
+      PingResult := FLib.PQgetResult(FHandle);
       while PingResult <> nil do begin
-        PQclear(PingResult);
-        PingResult := PQgetResult(FHandle);
+        FLib.PQclear(PingResult);
+        PingResult := FLib.PQgetResult(FHandle);
       end;
     end;
 
@@ -2615,24 +2469,24 @@ begin
   SetLength(FLastRawResults, 0);
   FResultCount := 0;
   FStatementNum := 1;
-  QueryStatus := mysql_real_query(FHandle, PAnsiChar(NativeSQL), Length(NativeSQL));
+  QueryStatus := FLib.mysql_real_query(FHandle, PAnsiChar(NativeSQL), Length(NativeSQL));
   FLastQueryDuration := GetTickCount - TimerStart;
   FLastQueryNetworkDuration := 0;
   if QueryStatus <> 0 then begin
     // Most errors will show up here, some others slightly later, after mysql_store_result()
     Log(lcError, GetLastErrorMsg);
-    raise EDatabaseError.Create(GetLastErrorMsg, GetLastErrorCode);
+    raise EDbError.Create(GetLastErrorMsg, GetLastErrorCode);
   end else begin
     // We must call mysql_store_result() + mysql_free_result() to unblock the connection
     // See: http://dev.mysql.com/doc/refman/5.0/en/mysql-store-result.html
     FRowsAffected := 0;
-    FWarningCount := mysql_warning_count(FHandle);
+    FWarningCount := FLib.mysql_warning_count(FHandle);
     FRowsFound := 0;
     TimerStart := GetTickCount;
-    QueryResult := mysql_store_result(FHandle);
+    QueryResult := FLib.mysql_store_result(FHandle);
     FLastQueryNetworkDuration := GetTickCount - TimerStart;
 
-    if (QueryResult = nil) and (mysql_affected_rows(FHandle) = -1) then begin
+    if (QueryResult = nil) and (FLib.mysql_affected_rows(FHandle) = -1) then begin
       // Indicates a late error, e.g. triggered by mysql_store_result(), after selecting a stored
       // function with invalid SQL body. Also SHOW TABLE STATUS on older servers.
       // See http://dev.mysql.com/doc/refman/5.0/en/mysql-affected-rows.html
@@ -2642,7 +2496,7 @@ begin
       //   indicates that the query returned an error or that, for a SELECT query,
       //   mysql_affected_rows() was called prior to calling mysql_store_result()."
       Log(lcError, GetLastErrorMsg);
-      raise EDatabaseError.Create(GetLastErrorMsg);
+      raise EDbError.Create(GetLastErrorMsg);
     end;
 
     if QueryResult = nil then
@@ -2651,27 +2505,27 @@ begin
     while QueryStatus=0 do begin
       if QueryResult <> nil then begin
         // Statement returned a result set
-        Inc(FRowsFound, mysql_num_rows(QueryResult));
+        Inc(FRowsFound, FLib.mysql_num_rows(QueryResult));
         if DoStoreResult then begin
           SetLength(FLastRawResults, Length(FLastRawResults)+1);
           FLastRawResults[Length(FLastRawResults)-1] := QueryResult;
         end else begin
-          mysql_free_result(QueryResult);
+          FLib.mysql_free_result(QueryResult);
         end;
       end else begin
         // No result, but probably affected rows
-        Inc(FRowsAffected, mysql_affected_rows(FHandle));
+        Inc(FRowsAffected, FLib.mysql_affected_rows(FHandle));
       end;
       // more results? -1 = no, >0 = error, 0 = yes (keep looping)
       Inc(FStatementNum);
-      QueryStatus := mysql_next_result(FHandle);
+      QueryStatus := FLib.mysql_next_result(FHandle);
       if QueryStatus = 0 then
-        QueryResult := mysql_store_result(FHandle)
+        QueryResult := FLib.mysql_store_result(FHandle)
       else if QueryStatus > 0 then begin
         // MySQL stops executing a multi-query when an error occurs. So do we here by raising an exception.
         SetLength(FLastRawResults, 0);
         Log(lcError, GetLastErrorMsg);
-        raise EDatabaseError.Create(GetLastErrorMsg);
+        raise EDbError.Create(GetLastErrorMsg);
       end;
     end;
     FResultCount := Length(FLastRawResults);
@@ -2733,7 +2587,7 @@ begin
     on E:EOleException do begin
       FLastError := E.Message;
       Log(lcError, GetLastErrorMsg);
-      raise EDatabaseError.Create(GetLastErrorMsg);
+      raise EDbError.Create(GetLastErrorMsg);
     end;
   end;
 end;
@@ -2769,48 +2623,48 @@ begin
   FRowsAffected := 0;
   FWarningCount := 0;
 
-  QueryStatus := PQsendQuery(FHandle, PAnsiChar(NativeSQL));
+  QueryStatus := FLib.PQsendQuery(FHandle, PAnsiChar(NativeSQL));
 
   FLastQueryDuration := GetTickCount - TimerStart;
   FLastQueryNetworkDuration := 0;
   if QueryStatus <> 1 then begin
     Log(lcError, GetLastErrorMsg);
-    raise EDatabaseError.Create(GetLastErrorMsg);
+    raise EDbError.Create(GetLastErrorMsg);
   end else begin
     FRowsAffected := 0;
     FRowsFound := 0;
     TimerStart := GetTickCount;
-    QueryResult := PQgetResult(FHandle);
+    QueryResult := FLib.PQgetResult(FHandle);
     FLastQueryNetworkDuration := GetTickCount - TimerStart;
 
     DetectUSEQuery(SQL);
 
     while QueryResult <> nil do begin
-      if PQnfields(QueryResult) > 0 then begin
+      if FLib.PQnfields(QueryResult) > 0 then begin
         // Statement returned a result set
-        Inc(FRowsFound, PQntuples(QueryResult));
+        Inc(FRowsFound, FLib.PQntuples(QueryResult));
         if DoStoreResult then begin
           SetLength(FLastRawResults, Length(FLastRawResults)+1);
           FLastRawResults[Length(FLastRawResults)-1] := QueryResult;
         end else begin
-          PQclear(QueryResult);
+          FLib.PQclear(QueryResult);
         end;
       end else begin
-        Inc(FRowsAffected, StrToIntDef(String(PQcmdTuples(QueryResult)), 0));
+        Inc(FRowsAffected, StrToIntDef(String(FLib.PQcmdTuples(QueryResult)), 0));
       end;
       if LastErrorMsg <> '' then begin
         SetLength(FLastRawResults, 0);
         Log(lcError, GetLastErrorMsg);
         // Clear remaining results, to avoid "another command is already running"
         while QueryResult <> nil do begin
-          PQclear(QueryResult);
-          QueryResult := PQgetResult(FHandle);
+          FLib.PQclear(QueryResult);
+          QueryResult := FLib.PQgetResult(FHandle);
         end;
-        raise EDatabaseError.Create(GetLastErrorMsg);
+        raise EDbError.Create(GetLastErrorMsg);
       end;
       // more results?
       Inc(FStatementNum);
-      QueryResult := PQgetResult(FHandle);
+      QueryResult := FLib.PQgetResult(FHandle);
     end;
     FResultCount := Length(FLastRawResults);
 
@@ -2826,8 +2680,7 @@ var
 begin
   Result := TDBQueryList.Create(False);
   for i:=Low(FLastRawResults) to High(FLastRawResults) do begin
-    r := Parameters.CreateQuery(nil);
-    r.Connection := Self;
+    r := Parameters.CreateQuery(Self);
     r.SQL := FLastQuerySQL;
     r.Execute(False, i);
     Result.Add(r);
@@ -2845,8 +2698,7 @@ begin
   Batch := TSQLBatch.Create;
   Batch.SQL := FLastQuerySQL;
   for i:=Low(FLastRawResults) to High(FLastRawResults) do begin
-    r := Parameters.CreateQuery(nil);
-    r.Connection := Self;
+    r := Parameters.CreateQuery(Self);
     if Batch.Count > i then
       r.SQL := Batch[i].SQL
     else // See http://www.heidisql.com/forum.php?t=21036
@@ -2865,8 +2717,7 @@ var
 begin
   Result := TDBQueryList.Create(False);
   for i:=Low(FLastRawResults) to High(FLastRawResults) do begin
-    r := Parameters.CreateQuery(nil);
-    r.Connection := Self;
+    r := Parameters.CreateQuery(Self);
     r.SQL := FLastQuerySQL;
     r.Execute(False, i);
     Result.Add(r);
@@ -2911,7 +2762,7 @@ begin
   try
     Result := GetVar('SHOW CREATE VIEW '+QuoteIdent(Database)+'.'+QuoteIdent(Name), 1);
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ViewIS := GetResults('SELECT * FROM INFORMATION_SCHEMA.VIEWS WHERE '+
         'TABLE_SCHEMA='+EscapeString(Database)+' AND TABLE_NAME='+EscapeString(Name));
       Result := 'CREATE ';
@@ -2952,7 +2803,7 @@ begin
     rx.Free;
   except
     // Do not raise if that didn't work
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
 end;
 
@@ -3012,16 +2863,20 @@ begin
             ' AND TABLE_NAME='+EscapeString(Obj.Name)
             );
           // Comments in MSSQL. See http://www.heidisql.com/forum.php?t=19576
-          Comments := GetResults('SELECT c.name AS '+QuoteIdent('column')+', prop.value AS '+QuoteIdent('comment')+' '+
-            'FROM sys.extended_properties AS prop '+
-            'INNER JOIN sys.all_objects o ON prop.major_id = o.object_id '+
-            'INNER JOIN sys.schemas s ON o.schema_id = s.schema_id '+
-            'INNER JOIN sys.columns AS c ON prop.major_id = c.object_id AND prop.minor_id = c.column_id '+
-            'WHERE '+
-            '  prop.name='+EscapeString('MS_Description')+
-            '  AND s.name='+EscapeString(Obj.Schema)+
-            '  AND o.name='+EscapeString(Obj.Name)
-            );
+          try
+            Comments := GetResults('SELECT c.name AS '+QuoteIdent('column')+', prop.value AS '+QuoteIdent('comment')+' '+
+              'FROM sys.extended_properties AS prop '+
+              'INNER JOIN sys.all_objects o ON prop.major_id = o.object_id '+
+              'INNER JOIN sys.schemas s ON o.schema_id = s.schema_id '+
+              'INNER JOIN sys.columns AS c ON prop.major_id = c.object_id AND prop.minor_id = c.column_id '+
+              'WHERE '+
+              '  prop.name='+EscapeString('MS_Description')+
+              '  AND s.name='+EscapeString(Obj.Schema)+
+              '  AND o.name='+EscapeString(Obj.Name)
+              );
+          except // Fails on old servers
+            on E:EDbError do;
+          end;
         end;
       end;
       while not Cols.Eof do begin
@@ -3301,7 +3156,7 @@ begin
   if Queries.Count > 0 then try
     PrefetchResults(implodestr(';', Queries));
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
 
 end;
@@ -3323,6 +3178,9 @@ begin
     end else begin
       if FParameters.NetTypeGroup = ngPgSQL then begin
         s := EscapeString(Value);
+        // Get schema with the same name as user name in search path
+        // See https://www.heidisql.com/forum.php?t=34558
+        s := s + ', ' + EscapeString('$user');
         // Always keep public schema in search path, so one can use procedures from it without prefixing
         // See http://www.heidisql.com/forum.php?t=18581#p18905
         if Value <> 'public' then
@@ -3394,7 +3252,7 @@ begin
   if FThreadId = 0 then begin
     Ping(False);
     if FActive then
-      FThreadID := PQbackendPID(FHandle);
+      FThreadID := FLib.PQbackendPID(FHandle);
   end;
   Result := FThreadID;
 end;
@@ -3412,7 +3270,7 @@ end;
 function TMySQLConnection.GetCharacterSet: String;
 begin
   Result := inherited;
-  Result := DecodeAPIString(mysql_character_set_name(FHandle));
+  Result := DecodeAPIString(FLib.mysql_character_set_name(FHandle));
 end;
 
 
@@ -3424,9 +3282,9 @@ var
   Return: Integer;
 begin
   FStatementNum := 0;
-  Return := mysql_set_character_set(FHandle, PAnsiChar(Utf8Encode(CharsetName)));
+  Return := FLib.mysql_set_character_set(FHandle, PAnsiChar(Utf8Encode(CharsetName)));
   if Return <> 0 then
-    raise EDatabaseError.Create(LastErrorMsg)
+    raise EDbError.Create(LastErrorMsg)
   else
     FIsUnicode := Pos('utf8', LowerCase(CharsetName)) = 1;
 end;
@@ -3447,7 +3305,7 @@ end;
 
 function TMySQLConnection.GetLastErrorCode: Cardinal;
 begin
-  Result := mysql_errno(FHandle);
+  Result := FLib.mysql_errno(FHandle);
 end;
 
 
@@ -3463,7 +3321,7 @@ end;
 
 function TPgConnection.GetLastErrorCode: Cardinal;
 begin
-  Result := Cardinal(PQstatus(FHandle));
+  Result := Cardinal(FLib.PQstatus(FHandle));
 end;
 
 
@@ -3476,16 +3334,27 @@ var
   rx: TRegExpr;
 begin
   Result := '';
-  Msg := DecodeAPIString(mysql_error(FHandle));
-  // Find "(errno: 123)" in message and add more meaningful message from perror.exe
-  rx := TRegExpr.Create;
-  rx.Expression := '.+\(errno\:\s+(\d+)\)';
-  if rx.Exec(Msg) then begin
-    Additional := MySQLErrorCodes.Values[rx.Match[1]];
-    if Additional <> '' then
-      Msg := Msg + CRLF + CRLF + Additional;
+  Additional := '';
+
+  Msg := DecodeAPIString(FLib.mysql_error(FHandle));
+
+  if SynRegExpr.ExecRegExpr('(Unknown SSL error|SSL connection error)', Msg) then begin
+    // Find specific strings in error message and provide helpful message
+    Additional := f_('Please select a different library in your session settings. (Current: "%s")', [FParameters.LibraryOrProvider]);
+  end else begin
+    // Find "(errno: 123)" in message and add more meaningful message from perror.exe
+    rx := TRegExpr.Create;
+    rx.Expression := '.+\(errno\:\s+(\d+)\)';
+    if rx.Exec(Msg) then begin
+      Additional := MySQLErrorCodes.Values[rx.Match[1]];
+    end;
+    rx.Free;
   end;
-  rx.Free;
+
+  if Additional <> '' then begin
+    Msg := Msg + sLineBreak + sLineBreak + Additional;
+  end;
+
   case FStatementNum of
     0: Result := Msg;
     1: Result := f_(MsgSQLError, [LastErrorCode, Msg]);
@@ -3519,7 +3388,7 @@ end;
 
 function TPgConnection.GetLastErrorMsg: String;
 begin
-  Result := DecodeAPIString(PQerrorMessage(FHandle));
+  Result := DecodeAPIString(FLib.PQerrorMessage(FHandle));
   Result := Trim(Result);
 end;
 
@@ -3641,11 +3510,11 @@ begin
   if not Assigned(Result) then begin
     try
       FAllDatabases := GetCol('SHOW DATABASES');
-    except on E:EDatabaseError do
+    except on E:EDbError do
       try
         FAllDatabases := GetCol('SELECT '+QuoteIdent('SCHEMA_NAME')+' FROM '+QuoteIdent('information_schema')+'.'+QuoteIdent('SCHEMATA')+' ORDER BY '+QuoteIdent('SCHEMA_NAME'));
       except
-        on E:EDatabaseError do begin
+        on E:EDbError do begin
           FAllDatabases := TStringList.Create;
           Log(lcError, f_('Database names not available due to missing privileges for user %s.', [CurrentUserHostCombination]));
         end;
@@ -3662,7 +3531,7 @@ begin
   if not Assigned(Result) then begin
     try
       FAllDatabases := GetCol('SELECT '+QuoteIdent('name')+' FROM '+GetSQLSpecifity(spDatabaseTable)+' ORDER BY '+QuoteIdent('name'));
-    except on E:EDatabaseError do
+    except on E:EDbError do
       FAllDatabases := TStringList.Create;
     end;
     Result := FAllDatabases;
@@ -3681,7 +3550,7 @@ begin
       FAllDatabases := GetCol('SELECT '+QuoteIdent('nspname')+
         ' FROM '+QuoteIdent('pg_catalog')+'.'+QuoteIdent('pg_namespace')+
         ' ORDER BY '+QuoteIdent('nspname'));
-    except on E:EDatabaseError do
+    except on E:EDbError do
       FAllDatabases := TStringList.Create;
     end;
   end;
@@ -3716,7 +3585,6 @@ begin
   // Fire query
   if Result = nil then begin
     Result := Parameters.CreateQuery(Self);
-    Result.Connection := Self;
     Result.SQL := SQL;
     try
       Result.Execute;
@@ -3911,6 +3779,38 @@ begin
   Result := StringReplace(Result, '\Z', #26, [rfReplaceAll]);
   Result := StringReplace(Result, '''''', '''', [rfReplaceAll]);
   Result := StringReplace(Result, '\''', '''', [rfReplaceAll]);
+end;
+
+
+function TDBConnection.ExtractLiteral(var SQL: String; Prefix: String): String;
+var
+  i, LitStart: Integer;
+  InLiteral: Boolean;
+  rx: TRegExpr;
+begin
+  // Return comment from SQL and remove it from the original string
+  // Single quotes are escaped by a second single quote
+  Result := '';
+  rx := TRegExpr.Create;
+  if Prefix.IsEmpty then
+    rx.Expression := '^\s*'''
+  else
+    rx.Expression := '^\s*'+QuoteRegExprMetaChars(Prefix)+'\s+''';
+  rx.ModifierI := True;
+  if rx.Exec(SQL) then begin
+    LitStart := rx.MatchLen[0]+1;
+    InLiteral := True;
+    for i:=LitStart to Length(SQL) do begin
+      if SQL[i] = '''' then
+        InLiteral := not InLiteral
+      else if not InLiteral then
+        break;
+    end;
+    Result := Copy(SQL, LitStart, i-LitStart-1);
+    Result := UnescapeString(Result);
+    Delete(SQL, 1, i);
+  end;
+  rx.Free;
 end;
 
 
@@ -4221,22 +4121,35 @@ begin
 end;
 
 
-function TMySQLConnection.MaxAllowedPacket: Int64;
+function TDBConnection.GetSessionVariable(VarName: String; DefaultValue: String=''; Refresh: Boolean=False): String;
 var
   Vars: TDBQuery;
+  VarExists: Boolean;
 begin
-  Vars := GetSessionVariables(False);
-  Result := 0;
+  // Return the value of a specific server variable
+  Vars := GetSessionVariables(Refresh);
+  Result := DefaultValue;
+  VarExists := False;
   while not Vars.Eof do begin
-    if Vars.Col(0) = 'max_allowed_packet' then begin
-      Result := MakeInt(Vars.Col(1));
+    if Vars.Col(0) = VarName then begin
+      Result := Vars.Col(1);
+      VarExists := True;
       Break;
     end;
     Vars.Next;
   end;
-  if Result = 0 then begin
-    Log(lcError, f_('The server did not return a non-zero value for the %s variable. Assuming %s now.', ['max_allowed_packet', FormatByteNumber(Result)]));
+  if not VarExists then begin
+    Log(lcDebug, 'Variable "'+VarName+'" does not exist');
+  end;
+end;
+
+
+function TMySQLConnection.MaxAllowedPacket: Int64;
+begin
+  Result := MakeInt(GetSessionVariable('max_allowed_packet'));
+  if Result < SIZE_MB then begin
     Result := SIZE_MB;
+    Log(lcError, f_('The server did not return a non-zero value for the %s variable. Assuming %s now.', ['max_allowed_packet', FormatByteNumber(Result)]));
   end;
 
 end;
@@ -4276,19 +4189,11 @@ end;
 
 function TDBConnection.IdentifierEquals(Ident1, Ident2: String): Boolean;
 var
-  Vars: TDBQuery;
   CaseSensitivity: Integer;
 begin
   // Compare only name of identifier, in the case fashion the server tells us
-  Vars := GetSessionVariables(False);
-  CaseSensitivity := 1; // probably a bad default value, as this expects the server to run on Windows
-  while not Vars.Eof do begin
-    if Vars.Col(0) = 'lower_case_table_names' then begin
-      CaseSensitivity := MakeInt(Vars.Col(1));
-      Break;
-    end;
-    Vars.Next;
-  end;
+  // 1 is probably a bad default value, as this expects the server to run on Windows
+  CaseSensitivity := MakeInt(GetSessionVariable('lower_case_table_names', '1'));
   case CaseSensitivity of
     0: Result := Ident1 = Ident2;
     else Result := CompareText(Ident1, Ident2) = 0;
@@ -4317,10 +4222,7 @@ begin
       ' AND '+QuoteIdent('object_id')+' = object_id('+EscapeString(Obj.Database+'.'+Obj.Schema+'.'+Obj.Name)+')'
       );
   end else begin
-    if not Obj.Schema.IsEmpty then
-      Rows := GetVar('SELECT COUNT(*) FROM '+QuoteIdent(Obj.Schema)+'.'+QuoteIdent(Obj.Name))
-    else
-      Rows := GetVar('SELECT COUNT(*) FROM '+QuoteIdent(Obj.Database)+'.'+QuoteIdent(Obj.Name))
+    Rows := GetVar('SELECT COUNT(*) FROM '+Obj.QuotedDbAndTableName);
   end;
   Result := MakeInt(Rows);
 end;
@@ -4473,6 +4375,23 @@ begin
   if FCurrentUserHostCombination = '' then
     FCurrentUserHostCombination := GetVar(GetSQLSpecifity(spCurrentUserHost));
   Result := FCurrentUserHostCombination;
+end;
+
+
+function TDBConnection.GetAllUserHostCombinations: TStringList;
+begin
+  // For populating combobox items
+  if not Assigned(FAllUserHostCombinations) then begin
+    try
+      FAllUserHostCombinations := GetCol('SELECT CONCAT('+QuoteIdent('User')+', '+EscapeString('@')+', '+QuoteIdent('Host')+') '+
+        'FROM '+QuoteIdent('mysql')+'.'+QuoteIdent('user')+' '+
+        'WHERE '+QuoteIdent('User')+'!='+EscapeString('')+' '+
+        'ORDER BY '+QuoteIdent('User')+', '+QuoteIdent('Host'));
+    except on E:EDbError do
+      FAllUserHostCombinations := TStringList.Create;
+    end;
+  end;
+  Result := FAllUserHostCombinations;
 end;
 
 
@@ -4722,7 +4641,7 @@ begin
         );
     end;
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4770,7 +4689,7 @@ begin
   if ServerVersionInt >= 50000 then try
     Results := GetResults('SHOW FUNCTION STATUS WHERE '+QuoteIdent('Db')+'='+EscapeString(db));
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4791,7 +4710,7 @@ begin
   if ServerVersionInt >= 50000 then try
     Results := GetResults('SHOW PROCEDURE STATUS WHERE '+QuoteIdent('Db')+'='+EscapeString(db));
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4812,7 +4731,7 @@ begin
   if ServerVersionInt >= 50010 then try
     Results := GetResults('SHOW TRIGGERS FROM '+QuoteIdent(db));
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4836,7 +4755,7 @@ begin
     else
       Results := GetResults('SHOW EVENTS FROM '+QuoteIdent(db));
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4876,7 +4795,7 @@ begin
       ' FROM '+QuoteIdent(db)+GetSQLSpecifity(spDbObjectsTable)+
       ' WHERE '+QuoteIdent('type')+' IN ('+EscapeString('P')+', '+EscapeString('U')+', '+EscapeString('V')+', '+EscapeString('TR')+', '+EscapeString('FN')+', '+EscapeString('TF')+', '+EscapeString('IF')+')');
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4934,7 +4853,7 @@ begin
       ' WHERE t.'+QuoteIdent('table_schema')+'='+EscapeString(db)  // Use table_schema when using schemata
       );
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -4971,7 +4890,7 @@ begin
       'WHERE '+QuoteIdent('n')+'.'+QuoteIdent('nspname')+'='+EscapeString(db)
       );
   except
-    on E:EDatabaseError do;
+    on E:EDbError do;
   end;
   if Assigned(Results) then begin
     while not Results.Eof do begin
@@ -5079,15 +4998,12 @@ end;
 
 
 function TDBConnection.ConnectionInfo: TStringList;
-var
-  Infos, Val, v, ConnectionString: String;
-  major, minor, build: Integer;
-  rx: TRegExpr;
 
   function EvalBool(B: Boolean): String;
   begin
     if B then Result := _('Yes') else Result := _('No');
   end;
+
 begin
   Log(lcDebug, 'Get connection details ...');
   Result := TStringList.Create;
@@ -5107,52 +5023,73 @@ begin
     Result.Values[_('SSL enabled')] := EvalBool(IsSSL);
     if Assigned(FSessionVariables) then
       Result.Values['max_allowed_packet'] := FormatByteNumber(MaxAllowedPacket);
-    case Parameters.NetTypeGroup of
-      ngMySQL: begin
-        Result.Values[f_('Client version (%s)', [LibMysqlPath])] := DecodeApiString(mysql_get_client_info);
-        Infos := DecodeApiString(mysql_stat((Self as TMySQLConnection).FHandle));
-        rx := TRegExpr.Create;
-        rx.ModifierG := False;
-        rx.Expression := '(\S.*)\:\s+(\S*)(\s+|$)';
-        if rx.Exec(Infos) then while True do begin
-          Val := rx.Match[2];
-          if LowerCase(rx.Match[1]) = 'uptime' then
-            Val := FormatTimeNumber(StrToFloatDef(Val, 0), True)
-          else
-            Val := FormatNumber(Val);
-          Result.Values[_(rx.Match[1])] := Val;
-          if not rx.ExecNext then
-            break;
-        end;
-        rx.Free;
-      end;
-
-      ngMSSQL: begin
-        // clear out password
-        ConnectionString := TAdoDBConnection(Self).FAdoHandle.ConnectionString;
-        rx := TRegExpr.Create;
-        rx.ModifierI := True;
-        rx.Expression := '(\Wpassword=)([^;]*)';
-        ConnectionString := rx.Replace(ConnectionString, '${1}******', True);
-        rx.Free;
-        Result.Values[_('Connection string')] := ConnectionString;
-      end;
-
-      ngPgSQL: begin
-        v := IntToStr(PQlibVersion);
-        major := StrToIntDef(Copy(v, 1, Length(v)-4), 0);
-        minor := StrToIntDef(Copy(v, Length(v)-3, 2), 0);
-        build := StrToIntDef(Copy(v, Length(v)-1, 2), 0);
-        Result.Values[f_('Client version (%s)', [LibPqPath])] := IntToStr(major) + '.' + IntToStr(minor) + '.' + IntToStr(build);
-      end;
-    end;
   end;
+end;
+
+
+function TMySQLConnection.ConnectionInfo: TStringList;
+var
+  Infos, Val: String;
+  rx: TRegExpr;
+begin
+  Result := Inherited;
+  Result.Values[f_('Client version (%s)', [FLib.DllFile])] := DecodeApiString(FLib.mysql_get_client_info);
+  if FActive then begin
+    Infos := DecodeApiString(FLib.mysql_stat(FHandle));
+    rx := TRegExpr.Create;
+    rx.ModifierG := False;
+    rx.Expression := '(\S.*)\:\s+(\S*)(\s+|$)';
+    if rx.Exec(Infos) then while True do begin
+      Val := rx.Match[2];
+      if LowerCase(rx.Match[1]) = 'uptime' then
+        Val := FormatTimeNumber(StrToFloatDef(Val, 0), True)
+      else
+        Val := FormatNumber(Val);
+      Result.Values[_(rx.Match[1])] := Val;
+      if not rx.ExecNext then
+        break;
+    end;
+    rx.Free;
+  end;
+end;
+
+
+function TAdoDBConnection.ConnectionInfo: TStringList;
+var
+  ConnectionString: String;
+  rx: TRegExpr;
+begin
+  Result := Inherited;
+  if FActive then begin
+    // clear out password
+    ConnectionString := FAdoHandle.ConnectionString;
+    rx := TRegExpr.Create;
+    rx.ModifierI := True;
+    rx.Expression := '(\Wpassword=)([^;]*)';
+    ConnectionString := rx.Replace(ConnectionString, '${1}******', True);
+    rx.Free;
+    Result.Values[_('Connection string')] := ConnectionString;
+  end;
+end;
+
+
+function TPgConnection.ConnectionInfo: TStringList;
+var
+  v: String;
+  major, minor, build: Integer;
+begin
+  Result := Inherited;
+  v := IntToStr(FLib.PQlibVersion);
+  major := StrToIntDef(Copy(v, 1, Length(v)-4), 0);
+  minor := StrToIntDef(Copy(v, Length(v)-3, 2), 0);
+  build := StrToIntDef(Copy(v, Length(v)-1, 2), 0);
+  Result.Values[f_('Client version (%s)', [FLib.DllFile])] := IntToStr(major) + '.' + IntToStr(minor) + '.' + IntToStr(build);
 end;
 
 
 procedure TDBConnection.ParseTableStructure(CreateTable: String; Columns: TTableColumnList; Keys: TTableKeyList; ForeignKeys: TForeignKeyList);
 var
-  ColSpec, Quotes: String;
+  ColSpec, Quotes, Tail: String;
   rx, rxCol: TRegExpr;
   i: Integer;
   InLiteral: Boolean;
@@ -5338,7 +5275,15 @@ begin
   // Detect keys
   // PRIMARY KEY (`id`), UNIQUE KEY `id` (`id`), KEY `id_2` (`id`) USING BTREE,
   // KEY `Text` (`Text`(100)), FULLTEXT KEY `Email` (`Email`,`Text`)
-  rx.Expression := '^\s+((\w+)\s+)?KEY\s+(['+Quotes+']?([^'+Quotes+']+)['+Quotes+']?\s+)?((USING|TYPE)\s+(\w+)\s+)?\((.+)\)(\s+USING\s+(\w+))?(\s+KEY_BLOCK_SIZE(\s|\=)+\d+)?,?$';
+  // KEY `idx_str` TYPE HASH (`str`) -- pre 5.0 syntax
+  // KEY `idx_str` (`str`) USING HASH COMMENT 'xxxxxxx'
+  rx.Expression := '^\s+((\w+)\s+)?KEY\s+(['+Quotes+']?([^'+Quotes+']+)['+Quotes+']?\s+)?'+
+    '((USING|TYPE)\s+(\w+)\s+)?'+
+    '\((.+)\)'+
+    '(\s+USING\s+(\w+))?'+
+    '(\s+KEY_BLOCK_SIZE(\s|\=)+\d+)?'+
+    '([^,\)]*)'+
+    ',?$';
   if rx.Exec(CreateTable) then while true do begin
     if not Assigned(Keys) then
       break;
@@ -5368,6 +5313,10 @@ begin
       end;
       Key.Columns[i] := StringReplace(Key.Columns[i], QuoteReplacement, FQuoteChar, [rfReplaceAll]);
     end;
+
+    Tail := rx.Match[13];
+    Key.Comment := ExtractLiteral(Tail, 'COMMENT');
+
     if not rx.ExecNext then
       break;
   end;
@@ -5558,7 +5507,7 @@ begin
     if Param.Context = '' then
       Param.Context := 'IN';
     Param.Name := DeQuoteIdent(rx.Match[4]);
-    Param.Datatype := rx.Match[5];
+    Param.Datatype := Trim(rx.Match[5]);
     Parameters.Add(Param);
     if not rx.ExecNext then
       break;
@@ -5669,6 +5618,7 @@ end;
 constructor TDBQuery.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FConnection := AOwner as TDbConnection;
   FRecNo := -1;
   FRecordCount := 0;
   FColumnNames := TStringList.Create;
@@ -5678,6 +5628,21 @@ begin
   FStoreResult := True;
   FDBObject := nil;
   FFormatSettings := TFormatSettings.Create('en-US');
+end;
+
+
+constructor TMySQLQuery.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  // suspicous state here - what type has FConnection now?
+  FConnection := AOwner as TMySQLConnection;
+end;
+
+
+constructor TPgQuery.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  FConnection := AOwner as TPgConnection;
 end;
 
 
@@ -5704,7 +5669,7 @@ var
   i: Integer;
 begin
   if HasResult then for i:=Low(FResultList) to High(FResultList) do
-    mysql_free_result(FResultList[i]);
+    FConnection.Lib.mysql_free_result(FResultList[i]);
   SetLength(FResultList, 0);
   inherited;
 end;
@@ -5728,7 +5693,7 @@ var
   i: Integer;
 begin
   if HasResult then for i:=Low(FResultList) to High(FResultList) do
-    PQclear(FResultList[i]);
+    FConnection.Lib.PQclear(FResultList[i]);
   SetLength(FResultList, 0);
   inherited;
 end;
@@ -5757,7 +5722,7 @@ begin
     NumResults := Length(FResultList)+1
   else begin
     for i:=Low(FResultList) to High(FResultList) do
-      mysql_free_result(FResultList[i]);
+      FConnection.Lib.mysql_free_result(FResultList[i]);
     NumResults := 1;
     FRecordCount := 0;
     FAutoIncrementColumn := -1;
@@ -5773,14 +5738,14 @@ begin
     if HasResult then begin
       // FCurrentResults is normally done in SetRecNo, but never if result has no rows
       FCurrentResults := LastResult;
-      NumFields := mysql_num_fields(LastResult);
+      NumFields := FConnection.Lib.mysql_num_fields(LastResult);
       SetLength(FColumnTypes, NumFields);
       SetLength(FColumnLengths, NumFields);
       SetLength(FColumnFlags, NumFields);
       FColumnNames.Clear;
       FColumnOrgNames.Clear;
       for i:=0 to NumFields-1 do begin
-        Field := mysql_fetch_field_direct(LastResult, i);
+        Field := FConnection.Lib.mysql_fetch_field_direct(LastResult, i);
         FColumnNames.Add(Connection.DecodeAPIString(Field.name));
         if Connection.ServerVersionInt >= 40100 then
           FColumnOrgNames.Add(Connection.DecodeAPIString(Field.org_name))
@@ -5920,7 +5885,7 @@ begin
           //ftTimeStampOffset: // this is NOT data type DATETIMEOFFSET
           //  TypeIndex := dtDatetime;
           else
-            raise EDatabaseError.CreateFmt(_('Unknown data type for column #%d - %s: %d'), [i, FColumnNames[i], Integer(LastResult.Fields[i].DataType)]);
+            raise EDbError.CreateFmt(_('Unknown data type for column #%d - %s: %d'), [i, FColumnNames[i], Integer(LastResult.Fields[i].DataType)]);
         end;
         for j:=0 to High(FConnection.DataTypes) do begin
           if TypeIndex = FConnection.DataTypes[j].Index then
@@ -5961,7 +5926,7 @@ begin
     NumResults := Length(FResultList)+1
   else begin
     for i:=Low(FResultList) to High(FResultList) do
-      PQclear(FResultList[i]);
+      FConnection.Lib.PQclear(FResultList[i]);
     NumResults := 1;
     FRecordCount := 0;
     FAutoIncrementColumn := -1;
@@ -5971,13 +5936,13 @@ begin
     Connection.Log(lcDebug, 'Result #'+IntToStr(NumResults)+' fetched.');
     SetLength(FResultList, NumResults);
     FResultList[NumResults-1] := LastResult;
-    FRecordCount := FRecordCount + PQntuples(LastResult);
+    FRecordCount := FRecordCount + FConnection.Lib.PQntuples(LastResult);
   end;
   if not AddResult then begin
     if HasResult then begin
       // FCurrentResults is normally done in SetRecNo, but never if result has no rows
       FCurrentResults := LastResult;
-      NumFields := PQnfields(LastResult);
+      NumFields := FConnection.Lib.PQnfields(LastResult);
       SetLength(FColumnTypes, NumFields);
       SetLength(FColumnLengths, NumFields);
       SetLength(FColumnFlags, NumFields);
@@ -5985,9 +5950,9 @@ begin
       FColumnOrgNames.Clear;
       rx := TRegExpr.Create;
       for i:=0 to NumFields-1 do begin
-        FColumnNames.Add(Connection.DecodeAPIString(PQfname(LastResult, i)));
+        FColumnNames.Add(Connection.DecodeAPIString(FConnection.Lib.PQfname(LastResult, i)));
         FColumnOrgNames.Add(FColumnNames[FColumnNames.Count-1]);
-        FieldTypeOID :=  PQftype(LastResult, i);
+        FieldTypeOID := FConnection.Lib.PQftype(LastResult, i);
         FColumnTypes[i] := FConnection.GetDatatypeByNativeType(FieldTypeOID, FColumnNames[FColumnNames.Count-1]);
       end;
       rx.Free;
@@ -6069,11 +6034,11 @@ begin
           // Do not seek if FCurrentRow points to the previous row of the wanted row
           WantedLocalRecNo := FCurrentResults.row_count-(NumRows-Value);
           if (WantedLocalRecNo = 0) or (FRecNo+1 <> Value) or (FCurrentRow = nil) then
-            mysql_data_seek(FCurrentResults, WantedLocalRecNo);
-          FCurrentRow := mysql_fetch_row(FCurrentResults);
+            FConnection.Lib.mysql_data_seek(FCurrentResults, WantedLocalRecNo);
+          FCurrentRow := FConnection.Lib.mysql_fetch_row(FCurrentResults);
           FCurrentUpdateRow := nil;
           // Remember length of column contents. Important for Col() so contents of cells with #0 chars are not cut off
-          LengthPointer := mysql_fetch_lengths(FCurrentResults);
+          LengthPointer := FConnection.Lib.mysql_fetch_lengths(FCurrentResults);
           for j:=Low(FColumnLengths) to High(FColumnLengths) do
             FColumnLengths[j] := PInteger(Integer(LengthPointer) + j * SizeOf(Integer))^;
           break;
@@ -6179,13 +6144,13 @@ begin
     if not RowFound then begin
       NumRows := 0;
       for i:=Low(FResultList) to High(FResultList) do begin
-        Inc(NumRows, PQntuples(FResultList[i]));
+        Inc(NumRows, FConnection.Lib.PQntuples(FResultList[i]));
         if NumRows > Value then begin
           FCurrentResults := FResultList[i];
-          FRecNoLocal := PQntuples(FCurrentResults)-(NumRows-Value);
+          FRecNoLocal := FConnection.Lib.PQntuples(FCurrentResults)-(NumRows-Value);
           FCurrentUpdateRow := nil;
           for j:=Low(FColumnLengths) to High(FColumnLengths) do
-            FColumnLengths[j] := PQgetlength(FCurrentResults, FRecNoLocal, j);
+            FColumnLengths[j] := FConnection.Lib.PQgetlength(FCurrentResults, FRecNoLocal, j);
           break;
         end;
       end;
@@ -6229,13 +6194,13 @@ end;
 
 function TAdoDBQuery.GetColBinData(Column: Integer; var baData: TBytes): Boolean;
 begin
-  Raise EDatabaseError.Create(SNotImplemented);
+  Raise EDbError.Create(SNotImplemented);
 end;
 
 
 function TPGQuery.GetColBinData(Column: Integer; var baData: TBytes): Boolean;
 begin
-  Raise EDatabaseError.Create(SNotImplemented);
+  Raise EDbError.Create(SNotImplemented);
 end;
 
 
@@ -6261,7 +6226,7 @@ begin
         Result := Connection.DecodeAPIString(AnsiStr);
       // Create string bitmask for BIT fields
       if Datatype(Column).Index = dtBit then begin
-        Field := mysql_fetch_field_direct(FCurrentResults, column);
+        Field := FConnection.Lib.mysql_fetch_field_direct(FCurrentResults, column);
         // FConnection.Log(lcInfo, Field.name+':  def: '+field.def+'  length: '+inttostr(field.length)+'  max_length: '+inttostr(field.max_length)+'  decimals: '+inttostr(field.decimals));
         for c in Result do begin
           ByteVal := Byte(c);
@@ -6282,7 +6247,7 @@ begin
 
     end;
   end else if not IgnoreErrors then
-    Raise EDatabaseError.CreateFmt(_(MsgInvalidColumn), [Column, ColumnCount, RecordCount]);
+    Raise EDbError.CreateFmt(_(MsgInvalidColumn), [Column, ColumnCount, RecordCount]);
 end;
 
 
@@ -6315,7 +6280,7 @@ begin
       end
     end;
   end else if not IgnoreErrors then
-    Raise EDatabaseError.CreateFmt(_(MsgInvalidColumn), [Column, ColumnCount, RecordCount]);
+    Raise EDbError.CreateFmt(_(MsgInvalidColumn), [Column, ColumnCount, RecordCount]);
 end;
 
 
@@ -6327,7 +6292,7 @@ begin
     if FEditingPrepared and Assigned(FCurrentUpdateRow) then begin
       Result := FCurrentUpdateRow[Column].NewText;
     end else begin
-      SetString(AnsiStr, PQgetvalue(FCurrentResults, FRecNoLocal, Column), FColumnLengths[Column]);
+      SetString(AnsiStr, FConnection.Lib.PQgetvalue(FCurrentResults, FRecNoLocal, Column), FColumnLengths[Column]);
       if Datatype(Column).Category in [dtcBinary, dtcSpatial] then
         Result := String(AnsiStr)
       else if Datatype(Column).Index = dtbool then
@@ -6336,7 +6301,7 @@ begin
         Result := Connection.DecodeAPIString(AnsiStr);
     end;
   end else if not IgnoreErrors then
-    Raise EDatabaseError.CreateFmt(_(MsgInvalidColumn), [Column, ColumnCount, RecordCount]);
+    Raise EDbError.CreateFmt(_(MsgInvalidColumn), [Column, ColumnCount, RecordCount]);
 end;
 
 
@@ -6350,7 +6315,7 @@ begin
   if idx > -1 then
     Result := Col(idx)
   else if not IgnoreErrors then
-    Raise EDatabaseError.CreateFmt(_('Column "%s" not available.'), [ColumnName]);
+    Raise EDbError.CreateFmt(_('Column "%s" not available.'), [ColumnName]);
 end;
 
 
@@ -6468,7 +6433,7 @@ var
 begin
   Result := nil;
   if (Column < 0) or (Column >= FColumnOrgNames.Count) then
-    raise EDatabaseError.CreateFmt(_('Column #%s not available.'), [IntToStr(Column)]);
+    raise EDbError.CreateFmt(_('Column #%s not available.'), [IntToStr(Column)]);
   if FColumns <> nil then begin
     for i:=0 to FColumns.Count-1 do begin
       if FColumns[i].Name = FColumnOrgNames[Column] then begin
@@ -6605,7 +6570,7 @@ begin
   if FEditingPrepared and Assigned(FCurrentUpdateRow) then
     Result := FCurrentUpdateRow[Column].NewIsNull
   else
-    Result := PQgetisnull(FCurrentResults, FRecNoLocal, Column) = 1;
+    Result := FConnection.Lib.PQgetisnull(FCurrentResults, FRecNoLocal, Column) = 1;
 end;
 
 
@@ -6659,7 +6624,7 @@ begin
       end;
     end;
     if Obj = nil then
-      raise EDatabaseError.Create(f_('Could not find table or view %s.%s. Please refresh database tree.', [DB, TableName]));
+      raise EDbError.Create(f_('Could not find table or view %s.%s. Please refresh database tree.', [DB, TableName]));
   end;
   CreateCode := Connection.GetCreateCode(Obj);
   FColumns := TTableColumnList.Create;
@@ -6698,7 +6663,7 @@ begin
     sql := GridQuery('DELETE', 'FROM ' + QuotedDbAndTableName + ' WHERE ' + GetWhereClause);
     Connection.Query(sql);
     if Connection.RowsAffected = 0 then
-      raise EDatabaseError.Create(FormatNumber(Connection.RowsAffected)+' rows deleted when that should have been 1.');
+      raise EDbError.Create(FormatNumber(Connection.RowsAffected)+' rows deleted when that should have been 1.');
   end;
   if Assigned(FCurrentUpdateRow) then begin
     FUpdateData.Remove(FCurrentUpdateRow);
@@ -6829,7 +6794,7 @@ begin
       end;
       Data.Free;
     end;
-  except on E:EDatabaseError do
+  except on E:EDbError do
     Result := False;
   end;
 end;
@@ -6867,7 +6832,7 @@ var
 begin
   Result := True;
   if not FEditingPrepared then
-    raise EDatabaseError.Create(_('Internal error: Cannot post modifications before editing was prepared.'));
+    raise EDbError.Create(_('Internal error: Cannot post modifications before editing was prepared.'));
 
   for Row in FUpdateData do begin
     // Prepare update and insert queries
@@ -6931,7 +6896,7 @@ begin
         sqlUpdate := GridQuery('UPDATE', sqlUpdate);
         Connection.Query(sqlUpdate);
         if Connection.RowsAffected = 0 then begin
-          raise EDatabaseError.Create(FormatNumber(Connection.RowsAffected)+' rows updated when that should have been 1.');
+          raise EDbError.Create(FormatNumber(Connection.RowsAffected)+' rows updated when that should have been 1.');
           Result := False;
         end;
       end;
@@ -6948,7 +6913,7 @@ begin
       // Reload real row data from server if keys allow that
       EnsureFullRow(True);
     except
-      on E:EDatabaseError do begin
+      on E:EDbError do begin
         Result := False;
         ErrorDialog(E.Message);
       end;
@@ -7028,7 +6993,7 @@ begin
     // Return first available Field.db property, or just the current database as fallback.
     // For a view in db1 selecting from db2, this returns db2, which triggers errors in GetCreateViewCode!
     for i:=0 to ColumnCount-1 do begin
-      Field := mysql_fetch_field_direct(FCurrentResults, i);
+      Field := FConnection.Lib.mysql_fetch_field_direct(FCurrentResults, i);
       if Field.db <> '' then begin
         Result := Connection.DecodeAPIString(Field.db);
         break;
@@ -7064,7 +7029,7 @@ var
 begin
   IsView := False;
   for i:=0 to ColumnCount-1 do begin
-    Field := mysql_fetch_field_direct(FCurrentResults, i);
+    Field := FConnection.Lib.mysql_fetch_field_direct(FCurrentResults, i);
 
     if Connection.DecodeAPIString(Field.table) <> Connection.DecodeAPIString(Field.org_table) then begin
       // Probably a VIEW, in which case we rely on the first column's table name.
@@ -7084,14 +7049,14 @@ begin
     end;
 
     if (Field.org_table <> '') and (tbl <> '') and ((tbl <> Field.org_table) or (db <> Field.db)) then
-      raise EDatabaseError.Create(_('More than one table involved.'));
+      raise EDbError.Create(_('More than one table involved.'));
     if Field.org_table <> '' then begin
       tbl := Field.org_table;
       db := Field.db;
     end;
   end;
   if tbl = '' then
-    raise EDatabaseError.Create(_('Could not determine name of table.'))
+    raise EDbError.Create(_('Could not determine name of table.'))
   else
     Result := Connection.DecodeAPIString(tbl)
 end;
@@ -7109,7 +7074,7 @@ begin
     Result := rx.Match[1];
   rx.Free;
   if Result = '' then
-    raise EDatabaseError.Create('Could not determine name of table.');
+    raise EDbError.Create('Could not determine name of table.');
 end;
 
 
@@ -7121,7 +7086,7 @@ begin
   // Get table name from a result set
   Result := '';
   for i:=0 to ColumnCount-1 do begin
-    FieldTypeOID := PQftable(FCurrentResults, i);
+    FieldTypeOID := FConnection.Lib.PQftable(FCurrentResults, i);
     if not FConnection.RegClasses.ContainsKey(FieldTypeOID) then begin
       Result := FConnection.GetVar('SELECT '+IntToStr(FieldTypeOID)+'::regclass');
       FConnection.RegClasses.Add(FieldTypeOID, Result);
@@ -7166,15 +7131,15 @@ var
 begin
   KeyCols := GetKeyColumns;
   if KeyCols.Count = 0 then
-    raise EDatabaseError.Create(_(MSG_NOGRIDEDITING));
+    raise EDbError.Create(_(MSG_NOGRIDEDITING));
   // All column names must be present in order to send valid INSERT/UPDATE/DELETE queries
   for i:=0 to KeyCols.Count-1 do begin
     if FColumnOrgNames.IndexOf(KeyCols[i]) = -1 then
-      raise EDatabaseError.Create(_(MSG_NOGRIDEDITING));
+      raise EDbError.Create(_(MSG_NOGRIDEDITING));
   end;
   for i:=0 to FColumnOrgNames.Count-1 do begin
     if FColumnOrgNames[i] = '' then
-      raise EDatabaseError.CreateFmt(_('Column #%d has an undefined origin: %s'), [i, ColumnNames[i]]);
+      raise EDbError.CreateFmt(_('Column #%d has an undefined origin: %s'), [i, ColumnNames[i]]);
   end;
 end;
 
@@ -7193,7 +7158,7 @@ begin
   for i:=0 to NeededCols.Count-1 do begin
     j := FColumnOrgNames.IndexOf(NeededCols[i]);
     if j = -1 then
-      raise EDatabaseError.CreateFmt(_('Cannot compose WHERE clause - column missing: %s'), [NeededCols[i]]);
+      raise EDbError.CreateFmt(_('Cannot compose WHERE clause - column missing: %s'), [NeededCols[i]]);
     if Result <> '' then
       Result := Result + ' AND';
     Result := Result + ' ' + Connection.QuoteIdent(FColumnOrgNames[j]);
@@ -7784,22 +7749,11 @@ begin
   case _type of
     1: Result := PAnsiChar(AnsiString(Dialog.editUsername.Text));
     2: Result := PAnsiChar(AnsiString(Dialog.editPassword.Text));
-    else raise EDatabaseError.CreateFmt(_('Unsupported type (%d) in %s.'), [_type, 'mysql_authentication_dialog_ask']);
+    else raise EDbError.CreateFmt(_('Unsupported type (%d) in %s.'), [_type, 'mysql_authentication_dialog_ask']);
   end;
   Dialog.Free;
 end;
 
-
-initialization
-
-
-finalization
-
-// Release libmysql.dll handle
-if LibMysqlHandle <> 0 then begin
-  FreeLibrary(LibMysqlHandle);
-  LibMysqlHandle := 0;
-end;
 
 
 end.

@@ -7,7 +7,7 @@ uses
   dbconnection, gnugettext;
 
 type
-  TfrmSelectDBObject = class(TFormWithSizeGrip)
+  TfrmSelectDBObject = class(TExtForm)
     TreeDBO: TVirtualStringTree;
     btnOK: TButton;
     btnCancel: TButton;
@@ -62,7 +62,7 @@ end;
 
 procedure TfrmSelectDBObject.FormCreate(Sender: TObject);
 begin
-  TranslateComponent(Self);
+  HasSizeGrip := True;
   Width := AppSettings.ReadInt(asSelectDBOWindowWidth);
   Height := AppSettings.ReadInt(asSelectDBOWindowHeight);
   TreeDBO.TreeOptions := MainForm.DBtree.TreeOptions;

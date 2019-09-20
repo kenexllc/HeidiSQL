@@ -11,7 +11,7 @@ uses
 {$I const.inc}
 
 type
-  TfrmTextEditor = class(TFormWithSizeGrip)
+  TfrmTextEditor = class(TExtForm)
     Panel1: TPanel;
     tlbStandard: TToolBar;
     btnWrap: TToolButton;
@@ -185,6 +185,7 @@ end;
 
 procedure TfrmTextEditor.FormCreate(Sender: TObject);
 begin
+  HasSizeGrip := True;
   FmemoText := TLineNormalizingMemo.Create(Self);
   FmemoText.Parent := Self;
   FmemoText.Align := alClient;
@@ -201,8 +202,6 @@ begin
   actSearchFindNext.Hint := MainForm.actQueryFindAgain.Hint;
   actSearchReplace.Caption := MainForm.actQueryReplace.Caption;
   actSearchReplace.Hint := MainForm.actQueryReplace.Hint;
-  TranslateComponent(Self);
-  FixDropDownButtons(Self);
   // Assign linebreak values to their menu item tags, to write less code later
   menuWindowsLB.Tag := Integer(lbsWindows);
   menuUnixLB.Tag := Integer(lbsUnix);

@@ -13,7 +13,7 @@
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "hy"; MessagesFile: "compiler:Languages\Armenian.islu"
+Name: "hy"; MessagesFile: "compiler:Languages\Armenian.isl"
 Name: "ca"; MessagesFile: "compiler:Languages\Catalan.isl"
 Name: "co"; MessagesFile: "compiler:Languages\Corsican.isl"
 Name: "cs"; MessagesFile: "compiler:Languages\Czech.isl"
@@ -22,20 +22,15 @@ Name: "nl"; MessagesFile: "compiler:Languages\Dutch.isl"
 Name: "fi"; MessagesFile: "compiler:Languages\Finnish.isl"
 Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
 Name: "de"; MessagesFile: "compiler:Languages\German.isl"
-Name: "el"; MessagesFile: "compiler:Languages\Greek.isl"
 Name: "he"; MessagesFile: "compiler:Languages\Hebrew.isl"
-Name: "hu"; MessagesFile: "compiler:Languages\Hungarian.isl"
+Name: "is"; MessagesFile: "compiler:Languages\Icelandic.isl"
 Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"
 Name: "ja"; MessagesFile: "compiler:Languages\Japanese.isl"
-Name: "ne"; MessagesFile: "compiler:Languages\Nepali.islu"
 Name: "no"; MessagesFile: "compiler:Languages\Norwegian.isl"
 Name: "pl"; MessagesFile: "compiler:Languages\Polish.isl"
 Name: "pt"; MessagesFile: "compiler:Languages\Portuguese.isl"
 Name: "pt_BR"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
-Name: "gd"; MessagesFile: "compiler:Languages\ScottishGaelic.isl"
-Name: "sr_Cyrl"; MessagesFile: "compiler:Languages\SerbianCyrillic.isl"
-Name: "sr_latin"; MessagesFile: "compiler:Languages\SerbianLatin.isl"
 Name: "sl"; MessagesFile: "compiler:Languages\Slovenian.isl"
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
@@ -58,7 +53,7 @@ AppReadmeFile={#WebSite}help.php?place=installer
 
 CloseApplications=yes
 ShowLanguageDialog=auto
-DefaultDirName={pf}\{#ProgName}
+DefaultDirName={commonpf}\{#ProgName}
 DefaultGroupName={#ProgName}
 AllowNoIcons=yes
 LicenseFile=license.txt
@@ -84,13 +79,6 @@ Name: "theme_material"; Description: "Use dark Material theme"; GroupDescription
 
 [InstallDelete]
 Type: files; Name: "{app}\heidisql32.exe"
-Type: files; Name: "{app}\libmysql40.dll"
-Type: files; Name: "{app}\libmysql41.dll"
-Type: files; Name: "{app}\{#ProgExeName}.manifest"
-Type: files; Name: "{app}\{#ProgNameLower}.url"
-Type: files; Name: "{app}\{#ProgNameLower}_forum.url"
-Type: files; Name: "{app}\donate.url"
-Type: files; Name: "{app}\function.txt"
 
 [Files]
 Source: "{#ProgNameLower}64.exe"; DestDir: "{app}"; DestName: "{#ProgExeName}"; Check: Is64BitInstallMode; Flags: ignoreversion
@@ -101,6 +89,8 @@ Source: "libmariadb64.dll"; DestDir: "{app}"; DestName: "libmariadb.dll"; Check:
 Source: "libmariadb32.dll"; DestDir: "{app}"; DestName: "libmariadb.dll"; Check: not Is64BitInstallMode; Flags: ignoreversion
 Source: "libmysql64.dll"; DestDir: "{app}"; DestName: "libmysql.dll"; Check: Is64BitInstallMode; Flags: ignoreversion
 Source: "libmysql32.dll"; DestDir: "{app}"; DestName: "libmysql.dll"; Check: not Is64BitInstallMode; Flags: ignoreversion
+Source: "libmysql-6.1-64.dll"; DestDir: "{app}"; DestName: "libmysql-6.1.dll"; Check: Is64BitInstallMode; Flags: ignoreversion
+Source: "libmysql-6.1-32.dll"; DestDir: "{app}"; DestName: "libmysql-6.1.dll"; Check: not Is64BitInstallMode; Flags: ignoreversion
 Source: "libpq64.dll"; DestDir: "{app}"; DestName: "libpq.dll"; Check: Is64BitInstallMode; Flags: ignoreversion
 Source: "libpq32.dll"; DestDir: "{app}"; DestName: "libpq.dll"; Check: not Is64BitInstallMode; Flags: ignoreversion
 Source: "libintl-864.dll"; DestDir: "{app}"; DestName: "libintl-8.dll"; Check: Is64BitInstallMode; Flags: ignoreversion

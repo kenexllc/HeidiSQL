@@ -45,7 +45,6 @@ type
     btnMoveDownParam: TToolButton;
     lblDisabledWhy: TLabel;
     spltTop: TSplitter;
-  	pnlDpiHelperOptions: TPanel;
     procedure comboTypeSelect(Sender: TObject);
     procedure btnSaveClick(Sender: TObject);
     procedure btnHelpClick(Sender: TObject);
@@ -96,7 +95,7 @@ type
 
 implementation
 
-uses main, mysql_structures, grideditlinks;
+uses main, dbstructures, grideditlinks;
 
 {$R *.dfm}
 
@@ -104,7 +103,6 @@ uses main, mysql_structures, grideditlinks;
 constructor TfrmRoutineEditor.Create(AOwner: TComponent);
 begin
   inherited;
-  TranslateComponent(Self);
   // Combo items in a .dfm are sporadically lost after an IDE restart,
   // so we set them here to avoid developer annoyance
   comboType.Items.Add(_('Procedure (doesn''t return a result)'));
@@ -184,11 +182,11 @@ begin
   btnSave.Enabled := Modified;
   btnDiscard.Enabled := Modified;
   // Buttons are randomly moved, since VirtualTree update, see #440
-  btnSave.Top := Height - btnSave.Height - Round(3 * DpiScaleFactor(MainForm));
+  btnSave.Top := Height - btnSave.Height - 3;
   btnHelp.Top := btnSave.Top;
   btnDiscard.Top := btnSave.Top;
   btnRunProc.Top := btnSave.Top;
-  btnRunProc.Left := Width - btnRunProc.Width - Round(3 * DpiScaleFactor(MainForm));
+  btnRunProc.Left := Width - btnRunProc.Width - 3;
   Mainform.actRunRoutines.Enabled := DBObject.Name <> '';
   Mainform.ShowStatusMsg;
   Screen.Cursor := crDefault;
@@ -220,7 +218,7 @@ end;
 procedure TfrmRoutineEditor.comboDefinerDropDown(Sender: TObject);
 begin
   // Populate definers from mysql.user
-  (Sender as TComboBox).Items.Assign(GetDefiners);
+  (Sender as TComboBox).Items.Assign(DBObject.Connection.AllUserHostCombinations);
 end;
 
 
@@ -526,7 +524,7 @@ begin
     btnDiscard.Enabled := Modified;
     Mainform.actRunRoutines.Enabled := True;
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ErrorDialog(E.Message);
       Result := mrAbort;
     end;

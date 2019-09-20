@@ -10,7 +10,7 @@ uses
 type
   TGridExportFormat = (efExcel, efCSV, efHTML, efXML, efSQLInsert, efSQLReplace, efSQLDeleteInsert, efLaTeX, efWiki, efPHPArray, efMarkDown, efJSON);
 
-  TfrmExportGrid = class(TFormWithSizeGrip)
+  TfrmExportGrid = class(TExtForm)
     btnOK: TButton;
     btnCancel: TButton;
     grpFormat: TRadioGroup;
@@ -93,7 +93,7 @@ type
 
 implementation
 
-uses main, apphelpers, dbconnection, mysql_structures;
+uses main, apphelpers, dbconnection, dbstructures;
 
 {$R *.dfm}
 
@@ -103,7 +103,7 @@ procedure TfrmExportGrid.FormCreate(Sender: TObject);
 var
   FormatDesc: String;
 begin
-  TranslateComponent(Self);
+  HasSizeGrip := True;
   Width := AppSettings.ReadInt(asGridExportWindowWidth);
   Height := AppSettings.ReadInt(asGridExportWindowHeight);
   editFilename.Text := AppSettings.ReadString(asGridExportFilename);
@@ -543,7 +543,11 @@ begin
     else
       NodeCount := Grid.RootNodeCount;
     MainForm.EnableProgress(NodeCount);
-    TableName := BestTableName(GridData);
+    try
+      TableName := GridData.TableName;
+    except
+      TableName := _('UnknownTable');
+    end;
     ExcludeCol := NoColumn;
     if (not chkIncludeAutoIncrement.Checked) or (not chkIncludeAutoIncrement.Enabled) then
       ExcludeCol := GridData.AutoIncrementColumn;
@@ -1004,7 +1008,7 @@ begin
 
   except
     // Whole export code wrapped here
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       Screen.Cursor := crDefault;
       ErrorDialog(E.Message);
     end

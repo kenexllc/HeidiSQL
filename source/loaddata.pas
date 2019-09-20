@@ -11,10 +11,10 @@ interface
 uses
   Windows, SysUtils, Classes, Controls, Forms, Dialogs, StdCtrls, ComCtrls, CheckLst,
   SynRegExpr, Buttons, ExtCtrls, ToolWin, ExtDlgs, Math, extra_controls,
-  dbconnection, mysql_structures, gnugettext;
+  dbconnection, dbstructures, gnugettext;
 
 type
-  Tloaddataform = class(TFormWithSizeGrip)
+  Tloaddataform = class(TExtForm)
     btnImport: TButton;
     btnCancel: TButton;
     lblDatabase: TLabel;
@@ -93,7 +93,7 @@ const
 
 procedure Tloaddataform.FormCreate(Sender: TObject);
 begin
-  TranslateComponent(Self);
+  HasSizeGrip := True;
   // Restore settings
   Width := AppSettings.ReadInt(asCSVImportWindowWidth);
   Height := AppSettings.ReadInt(asCSVImportWindowHeight);
@@ -308,7 +308,7 @@ begin
     try
       FConnection.Query('DELETE FROM ' + FConnection.QuotedDbAndTableName(comboDatabase.Text, comboTable.Text));
     except
-      on E:EDatabaseError do
+      on E:EDbError do
         ErrorDialog(_('Cannot truncate table'), E.Message);
     end;
   end;
@@ -354,7 +354,7 @@ begin
     end;
 
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       Screen.Cursor := crDefault;
       ModalResult := mrNone;
       MainForm.SetProgressState(pbsError);

@@ -5,7 +5,7 @@ interface
 uses
   Windows, Messages, SysUtils, Classes, Controls, Forms, Dialogs, StdCtrls,
   ShellApi, Math, Graphics, ComCtrls, ToolWin, extra_controls,
-  dbconnection, mysql_structures, VirtualTrees, grideditlinks, SynRegExpr, gnugettext, apphelpers;
+  dbconnection, dbstructures, VirtualTrees, grideditlinks, SynRegExpr, gnugettext, apphelpers;
 
 type
   TColInfo = class
@@ -25,7 +25,7 @@ type
   end;
   PFileInfo = ^TFileInfo;
 
-  TfrmInsertFiles = class(TFormWithSizeGrip)
+  TfrmInsertFiles = class(TExtForm)
     btnInsert: TButton;
     btnCancel: TButton;
     OpenDialog: TOpenDialog;
@@ -116,7 +116,7 @@ const
 
 procedure TfrmInsertFiles.FormCreate(Sender: TObject);
 begin
-  TranslateComponent(Self);
+  HasSizeGrip := True;
   ListFiles.Images := GetSystemImageList;
   DragAcceptFiles(Handle, True);
   MainForm.RestoreListSetup(ListColumns);
@@ -661,7 +661,7 @@ begin
       FConnection.Query(sql);
       Mainform.ProgressStep;
     except
-      on E:EDatabaseError do begin
+      on E:EDbError do begin
         Screen.Cursor := crDefault;
         MainForm.SetProgressState(pbsError);
         ErrorDialog(E.Message);

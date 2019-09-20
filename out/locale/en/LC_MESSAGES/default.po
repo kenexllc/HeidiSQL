@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: HeidiSQL\n"
 "POT-Creation-Date: 2012-11-05 21:40\n"
-"PO-Revision-Date: 2019-06-12 20:31+0200\n"
+"PO-Revision-Date: 2019-09-16 20:35+0200\n"
 "Last-Translator: Ansgar Becker <anse@heidisql.com>\n"
 "Language-Team: English (http://www.transifex.com/projects/p/heidisql/language/en/)\n"
 "MIME-Version: 1.0\n"
@@ -169,6 +169,12 @@ msgstr "Select columns"
 #: connections.dfm:5 main.dfm:1871
 msgid "Session manager"
 msgstr "Session manager"
+
+msgid "Session"
+msgstr "Session"
+
+msgid "Custom color:"
+msgstr "Custom color:"
 
 #. connform..btnSave..Caption
 #. connform..popupSessions..menuSave..Caption
@@ -4025,9 +4031,19 @@ msgstr "Trying to load library with full path: %s"
 msgid "Library error in %s: Could not find procedure address for \"%s\""
 msgstr "Library error in %s: Could not find procedure address for \"%s\""
 
+msgid "Library %s could not be loaded. Please select a different one."
+msgstr "Library %s could not be loaded. Please select a different one."
+
+#. DLL loading failed entirely
+msgid "Library %s seems unusable. Please select a different one."
+msgstr "Library %s seems unusable. Please select a different one."
+
 #: dbconnection.pas:1392
-msgid "Cannot find a usable %s. Please launch %s from the directory where you have installed it."
-msgstr "Cannot find a usable %s. Please launch %s from the directory where you have installed it."
+msgid "Please launch %s from the directory where you have installed it. Or just reinstall %s."
+msgstr "Please launch %s from the directory where you have installed it. Or just reinstall %s."
+
+msgid "Internal error %d: %s"
+msgstr "Internal error %d: %s"
 
 #: dbconnection.pas:1430
 msgid "Login to %s:"
@@ -4359,6 +4375,9 @@ msgstr "Settings successfully restored from %s"
 #. Automatic export of portable settings
 msgid "Portable settings file written, with %d changes."
 msgstr "Portable settings file written, with %d changes."
+
+msgid "Switching to read-only mode. Settings won't be saved. Use the command line parameter %s to use a custom file path."
+msgstr "Switching to read-only mode. Settings won't be saved. Use the command line parameter %s to use a custom file path."
 
 #: main.pas:2142
 msgid "Splitting SQL queries ..."
@@ -4745,6 +4764,10 @@ msgstr "Uptime"
 msgid "unknown"
 msgstr "unknown"
 
+#. Give the user some hint what he can do with his SSL related connection error
+msgid "Please select a different library in your session settings. (Current: \"%s\")"
+msgstr "Please select a different library in your session settings. (Current: \"%s\")"
+
 #: main.pas:5261
 msgid "Specify filter-value..."
 msgstr "Specify filter-value..."
@@ -4805,8 +4828,8 @@ msgid "Writing to session log file disabled now"
 msgstr "Writing to session log file disabled now"
 
 #: main.pas:6577
-msgid "Please select a process in the above list."
-msgstr "Please select a process in the above list."
+msgid "Please select a process with a running query"
+msgstr "Please select a process with a running query"
 
 #: main.pas:6990
 msgid "Reading Databases..."
@@ -6227,6 +6250,12 @@ msgstr "Go to database tree"
 msgid "Go to table filter"
 msgstr "Go to table filter"
 
+msgid "Switch to query/results"
+msgstr "Switch to query/results"
+
+msgid "Multi column filter"
+msgstr "Multi column filter"
+
 msgid "Tab 1"
 msgstr "Tab 1"
 
@@ -6364,8 +6393,26 @@ msgstr "Files"
 msgid "Reopen previously used SQL files and unsaved content in tabs *"
 msgstr "Reopen previously used SQL files and unsaved content in tabs *"
 
-msgid "Auto-storing tab setup failed"
-msgstr "Auto-storing tab setup failed"
+msgid "Storing tab setup failed"
+msgstr "Storing tab setup failed"
 
-msgid "Auto-restoring tab setup failed"
-msgstr "Auto-restoring tab setup failed"
+msgid "Restoring tab setup failed"
+msgstr "Restoring tab setup failed"
+
+msgid "Tabs won't be stored in this session."
+msgstr "Tabs won't be stored in this session."
+
+msgid "Installing %s might help. Please download from %s"
+msgstr "Installing %s might help. Please download from %s"
+
+msgid "Security issue: Using %s %s with insecure %s."
+msgstr "Security issue: Using %s %s with insecure %s."
+
+msgid "You should install %s from %s"
+msgstr "You should install %s from %s"
+
+msgid "Open URL"
+msgstr "Open URL"
+
+msgid "Open URL in your webbrowser"
+msgstr "Open URL in your webbrowser"

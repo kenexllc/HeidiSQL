@@ -4,7 +4,11 @@ object MainForm: TMainForm
   ClientHeight = 466
   ClientWidth = 977
   Color = clBtnFace
-  ParentFont = True
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -11
+  Font.Name = 'Tahoma'
+  Font.Style = []
   Menu = MainMenu1
   OldCreateOrder = True
   Position = poDesigned
@@ -69,7 +73,6 @@ object MainForm: TMainForm
     Width = 977
     Height = 19
     AutoHint = True
-    DoubleBuffered = True
     Panels = <
       item
         Width = 150
@@ -96,7 +99,6 @@ object MainForm: TMainForm
         Style = psOwnerDraw
         Width = 250
       end>
-    ParentDoubleBuffered = False
     ParentFont = True
     UseSystemFont = False
     OnClick = StatusBarClick
@@ -713,7 +715,7 @@ object MainForm: TMainForm
                   Caption = 'Process SQL:'
                   TabOrder = 0
                   object lblExplainProcess: TLabel
-                    Left = 87
+                    Left = 95
                     Top = 2
                     Width = 41
                     Height = 13
@@ -724,7 +726,7 @@ object MainForm: TMainForm
                     OnClick = lblExplainProcessClick
                   end
                   object lblExplainProcessAnalyzer: TLabel
-                    Left = 142
+                    Left = 170
                     Top = 2
                     Width = 162
                     Height = 13
@@ -1981,6 +1983,7 @@ object MainForm: TMainForm
   end
   object MainMenu1: TMainMenu
     AutoHotkeys = maManual
+    Images = VirtualImageListMain
     Left = 424
     Top = 152
     object MainMenuFile: TMenuItem
@@ -2160,6 +2163,12 @@ object MainForm: TMainForm
       end
       object actGotoDbTree1: TMenuItem
         Action = actGotoDbTree
+      end
+      object Switchtoqueryresults1: TMenuItem
+        Action = actGoToQueryResults
+      end
+      object Datatabfilter1: TMenuItem
+        Action = actGoToDataMultiFilter
       end
       object actGotoTab11: TMenuItem
         Action = actGotoTab1
@@ -3059,6 +3068,18 @@ object MainForm: TMainForm
       ShortCut = 16437
       OnExecute = actGotoTabNumberExecute
     end
+    object actGoToQueryResults: TAction
+      Category = 'Various'
+      Caption = 'Switch to query/results'
+      ShortCut = 117
+      OnExecute = actGoToQueryResultsExecute
+    end
+    object actGoToDataMultiFilter: TAction
+      Category = 'Various'
+      Caption = 'Multi column filter'
+      ShortCut = 118
+      OnExecute = actGoToDataMultiFilterExecute
+    end
     object actCopyRows: TAction
       Category = 'Various'
       Caption = 'Copy selected rows'
@@ -3066,6 +3087,13 @@ object MainForm: TMainForm
       ImageIndex = 155
       ShortCut = 24643
       OnExecute = actCopyOrCutExecute
+    end
+    object actDataOpenUrl: TAction
+      Category = 'Data'
+      Caption = 'Open URL'
+      Hint = 'Open URL in your webbrowser'
+      ImageIndex = 69
+      OnExecute = actDataOpenUrlExecute
     end
   end
   object menuConnections: TPopupMenu
@@ -3368,6 +3396,9 @@ object MainForm: TMainForm
       object Datapreferences1: TMenuItem
         Action = actPreferencesData
       end
+    end
+    object OpenURL1: TMenuItem
+      Action = actDataOpenUrl
     end
     object N4a: TMenuItem
       Caption = '-'

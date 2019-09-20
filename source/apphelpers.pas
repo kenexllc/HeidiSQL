@@ -12,9 +12,9 @@ uses
   Classes, SysUtils, Graphics, GraphUtil, ClipBrd, Dialogs, Forms, Controls, ShellApi,
   Windows, ShlObj, ActiveX, VirtualTrees, SynRegExpr, Messages, Math,
   Registry, DateUtils, Generics.Collections, StrUtils, AnsiStrings, TlHelp32, Types,
-  dbconnection, mysql_structures, SynMemo, Menus, WinInet, gnugettext, Themes,
+  dbconnection, dbstructures, SynMemo, Menus, WinInet, gnugettext, Themes,
   Character, ImgList, System.UITypes, ActnList, WinSock, IOUtils, StdCtrls, ComCtrls,
-  CommCtrl, Vcl.Imaging.pngimage;
+  CommCtrl;
 
 type
 
@@ -29,7 +29,6 @@ type
   TDBObjectEditor = class(TFrame)
     private
       FModified: Boolean;
-      FDefiners: TStringList;
       procedure SetModified(Value: Boolean);
     protected
     public
@@ -38,7 +37,6 @@ type
       destructor Destroy; override;
       procedure Init(Obj: TDBObject); virtual;
       function DeInit: TModalResult;
-      function GetDefiners: TStringList;
       property Modified: Boolean read FModified write SetModified;
       function ApplyModifications: TModalResult; virtual; abstract;
   end;
@@ -71,6 +69,7 @@ type
     private
       FOwner: TComponent;
       FURL: String;
+      FLastContent: String;
       FBytesRead: Integer;
       FContentLength: Integer;
       FTimeOut: Cardinal;
@@ -83,6 +82,7 @@ type
       property TimeOut: Cardinal read FTimeOut write FTimeOut;
       property BytesRead: Integer read FBytesRead;
       property ContentLength: Integer read FContentLength;
+      property LastContent: String read FLastContent;
   end;
 
   // Threading stuff
@@ -141,7 +141,7 @@ type
     asWrapLongLines, asDisplayBLOBsAsText, asSingleQueries, asMemoEditorWidth, asMemoEditorHeight, asMemoEditorMaximized,
     asMemoEditorWrap, asDelimiter, asSQLHelpWindowLeft, asSQLHelpWindowTop, asSQLHelpWindowWidth,
     asSQLHelpWindowHeight, asSQLHelpPnlLeftWidth, asSQLHelpPnlRightTopHeight, asHost,
-    asUser, asPassword, asCleartextPluginEnabled, asWindowsAuth, asLoginPrompt, asPort,
+    asUser, asPassword, asCleartextPluginEnabled, asWindowsAuth, asLoginPrompt, asPort, asLibrary,
     asPlinkExecutable, asSSHtunnelHost, asSSHtunnelHostPort, asSSHtunnelPort, asSSHtunnelUser,
     asSSHtunnelPassword, asSSHtunnelTimeout, asSSHtunnelPrivateKey, asSSLActive, asSSLKey,
     asSSLCert, asSSLCA, asSSLCipher, asNetType, asCompressed, asLocalTimeZone, asQueryTimeout, asKeepAlive,
@@ -184,6 +184,7 @@ type
     asColumnSelectorWidth, asColumnSelectorHeight, asDonatedEmail, asFavoriteObjects, asFavoriteObjectsOnly, asFullTableStatus, asLineBreakStyle,
     asPreferencesWindowWidth, asPreferencesWindowHeight,
     asFileDialogEncoding,
+    asThemePreviewWidth, asThemePreviewHeight, asThemePreviewTop, asThemePreviewLeft,
     asUnused);
   TAppSetting = record
     Name: String;
@@ -200,6 +201,7 @@ type
       FSessionPath: String;
       FRegistry: TRegistry;
       FPortableMode: Boolean;
+      FPortableModeReadOnly: Boolean;
       FRestoreTabsInitValue: Boolean;
       FSettingsFile: String;
       FSettings: Array[TAppSettingIndex] of TAppSetting;
@@ -242,10 +244,11 @@ type
       procedure ResetPath;
       property SessionPath: String read FSessionPath write SetSessionPath;
       property PortableMode: Boolean read FPortableMode;
+      property PortableModeReadOnly: Boolean read FPortableModeReadOnly write FPortableModeReadOnly;
       property Writes: Integer read FWrites;
       procedure ImportSettings(Filename: String);
-      procedure ExportSettings(Filename: String); overload;
-      procedure ExportSettings; overload;
+      function ExportSettings(Filename: String): Boolean; overload;
+      function ExportSettings: Boolean; overload;
       // Common directories
       function DirnameUserAppData: String;
       function DirnameUserDocuments: String;
@@ -264,7 +267,6 @@ type
   function encrypt(str: String): String;
   function decrypt(str: String): String;
   function HTMLSpecialChars(str: String): String;
-  function BestTableName(Data: TDBQuery): String;
   function EncodeURLParam(const Value: String): String;
   procedure StreamWrite(S: TStream; Text: String = '');
   function _GetFileSize(Filename: String): Int64;
@@ -277,7 +279,6 @@ type
   function ScanLineBreaks(Text: String): TLineBreaks;
   function CountLineBreaks(Text: String; LineBreak: TLineBreaks=lbsWindows): Cardinal;
   function fixNewlines(txt: String): String;
-  function ExtractLiteral(var SQL: String; Prefix: String): String;
   function GetShellFolder(CSIDL: integer): string;
   function goodfilename( str: String ): String;
   function ExtractBaseFileName(FileName: String): String;
@@ -303,7 +304,6 @@ type
   function WideHexToBin(text: String): AnsiString;
   function BinToWideHex(bin: AnsiString): String;
   procedure FixVT(VT: TVirtualStringTree; MultiLineCount: Word=1);
-  procedure FixDropDownButtons(Form: TForm);
   function GetTextHeight(Font: TFont): Integer;
   function ColorAdjustBrightness(Col: TColor; Shift: SmallInt): TColor;
   function ComposeOrderClause(Cols: TOrderColArray): String;
@@ -316,7 +316,6 @@ type
   function GetNextNode(Tree: TVirtualStringTree; CurrentNode: PVirtualNode; Selected: Boolean=False): PVirtualNode;
   function GetPreviousNode(Tree: TVirtualStringTree; CurrentNode: PVirtualNode; Selected: Boolean=False): PVirtualNode;
   function DateBackFriendlyCaption(d: TDateTime): String;
-  procedure InheritFont(AFont: TFont);
   function GetLightness(AColor: TColor): Byte;
   function ReformatSQL(SQL: String): String;
   function ParamBlobToStr(lpData: Pointer): String;
@@ -355,10 +354,10 @@ type
   function GetCurrentPackageFullName(out Len: Cardinal; Name: PWideChar): Integer; stdcall; external kernel32 delayed;
   function GetUwpFullName: String;
   function RunningAsUwp: Boolean;
-  function DpiScaleFactor(Form: TForm): Double;
   function GetThemeColor(Color: TColor): TColor;
   function ThemeIsDark(ThemeName: String): Boolean;
   function ProcessExists(pid: Cardinal): Boolean;
+  procedure ToggleCheckBoxWithoutClick(chk: TCheckBox; State: Boolean);
 
 var
   AppSettings: TAppSettings;
@@ -517,17 +516,6 @@ begin
   result := StringReplace(str, '&', '&amp;', [rfReplaceAll]);
   result := StringReplace(result, '<', '&lt;', [rfReplaceAll]);
   result := StringReplace(result, '>', '&gt;', [rfReplaceAll]);
-end;
-
-
-function BestTableName(Data: TDBQuery): String;
-begin
-  // Get table name from result if possible. Used by GridToXYZ() functions.
-  try
-    Result := Data.TableName;
-  except
-    Result := _('UnknownTable');
-  end;
 end;
 
 
@@ -771,38 +759,6 @@ begin
   txt := StringReplace(txt, #13, #10, [rfReplaceAll]);
   txt := StringReplace(txt, #10, CRLF, [rfReplaceAll]);
   result := txt;
-end;
-
-
-function ExtractLiteral(var SQL: String; Prefix: String): String;
-var
-  i, LitStart: Integer;
-  InLiteral: Boolean;
-  rx: TRegExpr;
-begin
-  // Return comment from SQL and remove it from the original string
-  // Single quotes are escaped by a second single quote
-  Result := '';
-  rx := TRegExpr.Create;
-  if Prefix.IsEmpty then
-    rx.Expression := '^\s*'''
-  else
-    rx.Expression := '^\s*'+QuoteRegExprMetaChars(Prefix)+'\s+''';
-  rx.ModifierI := True;
-  if rx.Exec(SQL) then begin
-    LitStart := rx.MatchLen[0]+1;
-    InLiteral := True;
-    for i:=LitStart to Length(SQL) do begin
-      if SQL[i] = '''' then
-        InLiteral := not InLiteral
-      else if not InLiteral then
-        break;
-    end;
-    Result := Copy(SQL, LitStart, i-LitStart-1);
-    Result := StringReplace(Result, '''''', '''', [rfReplaceAll]);
-    Delete(SQL, 1, i);
-  end;
-  rx.Free;
 end;
 
 
@@ -1343,7 +1299,7 @@ end;
 
 function ReadTextfileChunk(Stream: TFileStream; Encoding: TEncoding; ChunkSize: Int64 = 0): String;
 const
-  BufferPadding = SIZE_MB;
+  BufferPadding = 1;
 var
   DataLeft, StartPosition: Int64;
   LBuffer: TBytes;
@@ -1496,27 +1452,6 @@ begin
     VT.OnIncrementalSearch := Mainform.AnyGridIncrementalSearch;
   VT.OnStartOperation := Mainform.AnyGridStartOperation;
   VT.OnEndOperation := Mainform.AnyGridEndOperation;
-end;
-
-
-procedure FixDropDownButtons(Form: TForm);
-var
-  i: Integer;
-  Comp: TComponent;
-begin
-  // Work around broken dropdown (tool)button on Wine after translation:
-  // https://sourceforge.net/p/dxgettext/bugs/80/
-  for i:=0 to Form.ComponentCount-1 do begin
-    Comp := Form.Components[i];
-    if (Comp is TButton) and (TButton(Comp).Style = bsSplitButton) then begin
-      TButton(Comp).Style := bsPushButton;
-      TButton(Comp).Style := bsSplitButton;
-    end;
-    if (Comp is TToolButton) and (TToolButton(Comp).Style = tbsDropDown) then begin
-      TToolButton(Comp).Style := tbsButton;
-      TToolButton(Comp).Style := tbsDropDown;
-    end;
-  end;
 end;
 
 
@@ -1780,39 +1715,6 @@ begin
 end;
 
 
-procedure InheritFont(AFont: TFont);
-var
-  LogFont: TLogFont;
-  GUIFontName: String;
-begin
-  // Set custom font if set, or default system font.
-  // In high-dpi mode, the font *size* is increased automatically somewhere in the VCL,
-  // caused by a form's .Scaled property. So we don't increase it here again.
-  // To test this, you really need to log off/on Windows!
-  GUIFontName := AppSettings.ReadString(asGUIFontName);
-  if not GUIFontName.IsEmpty then begin
-    // Apply user specified font
-    AFont.Name := GUIFontName;
-    // Set size on top of automatic dpi-increased size
-    AFont.Size := AppSettings.ReadInt(asGUIFontSize);
-  end else begin
-    // Apply system font. See issue #3204.
-    // Code taken from http://www.gerixsoft.com/blog/delphi/system-font
-    if SystemParametersInfo(SPI_GETICONTITLELOGFONT, SizeOf(TLogFont), @LogFont, 0) then begin
-      AFont.Height := LogFont.lfHeight;
-      AFont.Orientation := LogFont.lfOrientation;
-      AFont.Charset := TFontCharset(LogFont.lfCharSet);
-      AFont.Name := PChar(@LogFont.lfFaceName);
-      case LogFont.lfPitchAndFamily and $F of
-        VARIABLE_PITCH: AFont.Pitch := fpVariable;
-        FIXED_PITCH: AFont.Pitch := fpFixed;
-        else AFont.Pitch := fpDefault;
-      end;
-    end;
-  end;
-end;
-
-
 function GetLightness(AColor: TColor): Byte;
 var
   R, G, B: Byte;
@@ -1944,6 +1846,7 @@ begin
   // Do not set alClient via DFM! In conjunction with ExplicitXXX properties that
   // repeatedly breaks the GUI layout when you reload the project
   Align := alClient;
+  TranslateComponent(Self);
 end;
 
 destructor TDBObjectEditor.Destroy;
@@ -2036,25 +1939,6 @@ begin
       mrNo: Modified := False;
     end;
   end;
-end;
-
-
-function TDBObjectEditor.GetDefiners: TStringList;
-  function q(s: String): String;
-  begin
-    Result := DBObject.Connection.QuoteIdent(s);
-  end;
-begin
-  // For populating combobox items
-  if not Assigned(FDefiners) then begin
-    try
-      FDefiners := DBObject.Connection.GetCol('SELECT CONCAT('+q('User')+', '+esc('@')+', '+q('Host')+') FROM '+
-        q('mysql')+'.'+q('user')+' WHERE '+q('User')+'!='+esc('')+' ORDER BY '+q('User')+', '+q('Host'));
-    except on E:EDatabaseError do
-      FDefiners := TStringList.Create;
-    end;
-  end;
-  Result := FDefiners;
 end;
 
 
@@ -2998,12 +2882,6 @@ begin
 end;
 
 
-function DpiScaleFactor(Form: TForm): Double;
-begin
-  Result := Form.Monitor.PixelsPerInch / Form.PixelsPerInch;
-end;
-
-
 function GetThemeColor(Color: TColor): TColor;
 begin
   // Not required with vcl-style-utils:
@@ -3043,6 +2921,18 @@ begin
   end;
   CloseHandle(Snapshot);
 end;
+
+
+procedure ToggleCheckBoxWithoutClick(chk: TCheckBox; State: Boolean);
+var
+  ClickEvent: TNotifyEvent;
+begin
+  ClickEvent := chk.OnClick;
+  chk.OnClick := nil;
+  chk.Checked := State;
+  chk.OnClick := ClickEvent;
+end;
+
 
 
 
@@ -3130,7 +3020,7 @@ begin
       Inc(FRowsFound, FConnection.RowsFound);
       Inc(FWarningCount, FConnection.WarningCount);
     except
-      on E:EDatabaseError do begin
+      on E:EDbError do begin
         if FStopOnErrors or (i = FBatch.Count - 1) then begin
           FErrorMessage := E.Message;
           ErrorAborted := True;
@@ -3324,13 +3214,14 @@ procedure THttpDownload.SendRequest(Filename: String);
 var
   NetHandle: HINTERNET;
   UrlHandle: HINTERNET;
-  Buffer: array[1..4096] of Byte;
+  Buffer: array[1..4096] of AnsiChar;
   Head: array[1..1024] of Char;
   BytesInChunk, HeadSize, Reserved, TimeOutSeconds: Cardinal;
   LocalFile: File;
   DoStore: Boolean;
   UserAgent, OS: String;
   HttpStatus: Integer;
+  ContentChunk: UTF8String;
 begin
   DoStore := False;
   if MainForm.IsWine then
@@ -3345,6 +3236,7 @@ begin
   InternetSetOption(NetHandle, INTERNET_OPTION_CONNECT_TIMEOUT, @TimeOutSeconds, SizeOf(TimeOutSeconds));
 
   UrlHandle := nil;
+  FLastContent := '';
   try
     UrlHandle := InternetOpenURL(NetHandle, PChar(FURL), nil, 0, INTERNET_FLAG_RELOAD, 0);
     if not Assigned(UrlHandle) then
@@ -3377,8 +3269,13 @@ begin
     // Stream contents
     while true do begin
       InternetReadFile(UrlHandle, @Buffer, SizeOf(Buffer), BytesInChunk);
-      if DoStore then
-        BlockWrite(LocalFile, Buffer, BytesInChunk);
+      // Either store as file or in memory variable
+      if DoStore then begin
+        BlockWrite(LocalFile, Buffer, BytesInChunk)
+      end else begin
+        SetString(ContentChunk, PAnsiChar(@Buffer[1]), BytesInChunk);
+        FLastContent := FLastContent + String(ContentChunk);
+      end;
       Inc(FBytesRead, BytesInChunk);
       if Assigned(FOnProgress) then
         FOnProgress(Self);
@@ -3435,6 +3332,7 @@ begin
 
   // Switch to portable mode if lock file exists. File content is ignored.
   FPortableMode := FileExists(PortableLockFile);
+  FPortableModeReadOnly := False;
 
   if FPortableMode then begin
     // Create file if only the lock file exists
@@ -3528,6 +3426,7 @@ begin
   InitSetting(asWindowsAuth,                      'WindowsAuth',                           0, False, '', True);
   InitSetting(asLoginPrompt,                      'LoginPrompt',                           0, False, '', True);
   InitSetting(asPort,                             'Port',                                  0, False, '', True);
+  InitSetting(asLibrary,                          'Library',                               0, False, 'libmariadb.dll', True);
   InitSetting(asPlinkExecutable,                  'PlinkExecutable',                       0, False, '');
   InitSetting(asSSHtunnelHost,                    'SSHtunnelHost',                         0, False, '', True);
   InitSetting(asSSHtunnelHostPort,                'SSHtunnelHostPort',                     22, False, '', True);
@@ -3652,7 +3551,8 @@ begin
   DefaultSnippetsDirectory := DefaultSnippetsDirectory + 'Snippets\';
   InitSetting(asCustomSnippetsDirectory,          'CustomSnippetsDirectory',               0, False, DefaultSnippetsDirectory);
   InitSetting(asPromptSaveFileOnTabClose,         'PromptSaveFileOnTabClose',              0, True);
-  InitSetting(asRestoreTabs,                      'RestoreTabs',                           0, True);
+  // Restore tabs feature crashes often on old XP systems, see https://www.heidisql.com/forum.php?t=34044
+  InitSetting(asRestoreTabs,                      'RestoreTabs',                           0, Win32MajorVersion >= 6);
   InitSetting(asWarnUnsafeUpdates,                'WarnUnsafeUpdates',                     0, True);
   InitSetting(asQueryWarningsMessage,             'QueryWarningsMessage',                  0, True);
   InitSetting(asCompletionProposal,               'CompletionProposal',                    0, True);
@@ -3723,6 +3623,10 @@ begin
   InitSetting(asPreferencesWindowWidth,           'PreferencesWindowWidth',                740);
   InitSetting(asPreferencesWindowHeight,          'PreferencesWindowHeight',               500);
   InitSetting(asFileDialogEncoding,               'FileDialogEncoding_%s',                 0);
+  InitSetting(asThemePreviewWidth,                'ThemePreviewWidth',                     300);
+  InitSetting(asThemePreviewHeight,               'ThemePreviewHeight',                    200);
+  InitSetting(asThemePreviewTop,                  'ThemePreviewTop',                       300);
+  InitSetting(asThemePreviewLeft,                 'ThemePreviewLeft',                      300);
 
   // Initialization values
   FRestoreTabsInitValue := ReadBool(asRestoreTabs);
@@ -3741,7 +3645,11 @@ var
 begin
   // Export settings into textfile in portable mode.
   if FPortableMode then try
-    ExportSettings(FSettingsFile);
+    try
+      ExportSettings;
+    except
+      // do nothing, even ShowMessage or ErrorDialog would trigger timer events followed by crashes;
+    end;
     FRegistry.CloseKey;
     FRegistry.DeleteKey(FBasePath);
 
@@ -4174,7 +4082,7 @@ begin
 end;
 
 
-procedure TAppSettings.ExportSettings(Filename: String);
+function TAppSettings.ExportSettings(Filename: String): Boolean;
 var
   Content, Value: String;
   DataType: TRegDataType;
@@ -4220,12 +4128,26 @@ begin
   Content := '';
   ReadKeyToContent(FBasePath);
   SaveUnicodeFile(FileName, Content);
+  Result := True;
 end;
 
 
-procedure TAppSettings.ExportSettings;
+function TAppSettings.ExportSettings: Boolean;
 begin
-  ExportSettings(FSettingsFile);
+  Result := False;
+  if not FPortableModeReadOnly then begin
+    try
+      ExportSettings(FSettingsFile);
+      Result := True;
+    except
+      on E:Exception do begin
+        FPortableModeReadOnly := True;
+        Raise Exception.Create(E.Message + CRLF + CRLF
+          + f_('Switching to read-only mode. Settings won''t be saved. Use the command line parameter %s to use a custom file path.', ['--psettings'])
+          );
+      end;
+    end;
+  end;
 end;
 
 

@@ -9,7 +9,7 @@ uses
   dbconnection, gnugettext;
 
 type
-  TfrmSQLhelp = class(TFormWithSizeGrip)
+  TfrmSQLhelp = class(TExtForm)
     URIOpenerDescription: TSynURIOpener;
     URIHighlighter: TSynURISyn;
     URIOpenerExample: TSynURIOpener;
@@ -93,7 +93,7 @@ begin
   memoDescription.Height := AppSettings.ReadInt(asSQLHelpPnlRightTopHeight);
   Caption := DEFAULT_WINDOW_CAPTION;
   FixVT(treeTopics);
-  TranslateComponent(Self);
+  HasSizeGrip := True;
 
   treeTopics.Clear;
   FreeAndNil(FRootTopics);
@@ -264,10 +264,10 @@ procedure TfrmSQLhelp.FormDestroy(Sender: TObject);
 begin
   AppSettings.WriteInt(asSQLHelpWindowLeft, Left );
   AppSettings.WriteInt(asSQLHelpWindowTop, Top );
-  AppSettings.WriteInt(asSQLHelpWindowWidth, Width );
-  AppSettings.WriteInt(asSQLHelpWindowHeight, Height );
-  AppSettings.WriteInt(asSQLHelpPnlLeftWidth, pnlLeft.Width );
-  AppSettings.WriteInt(asSQLHelpPnlRightTopHeight, memoDescription.Height );
+  AppSettings.WriteInt(asSQLHelpWindowWidth, Width);
+  AppSettings.WriteInt(asSQLHelpWindowHeight, Height);
+  AppSettings.WriteInt(asSQLHelpPnlLeftWidth, pnlLeft.Width);
+  AppSettings.WriteInt(asSQLHelpPnlRightTopHeight, memoDescription.Height);
   SqlHelpDialog := nil;
 end;
 

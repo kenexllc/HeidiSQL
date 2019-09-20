@@ -5,7 +5,7 @@ interface
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms,
   Dialogs, StdCtrls, SynEdit, SynMemo, SynRegExpr, ComCtrls, ExtCtrls, WideStrUtils,
-  apphelpers, dbconnection, gnugettext;
+  apphelpers, dbconnection, dbstructures, gnugettext;
 
 type
   TFrame = TDBObjectEditor;
@@ -77,7 +77,6 @@ uses main;
 constructor TfrmEventEditor.Create(AOwner: TComponent);
 begin
   inherited;
-  TranslateComponent(Self);
   Mainform.SynCompletionProposal.AddEditor(SynMemoBody);
   comboEveryInterval.Items := Explode('|', 'YEAR|QUARTER|MONTH|DAY|HOUR|MINUTE|WEEK|SECOND|YEAR_MONTH|'+
     'DAY_HOUR|DAY_MINUTE|DAY_SECOND|HOUR_MINUTE|HOUR_SECOND|MINUTE_SECOND');
@@ -248,7 +247,7 @@ begin
     CreateCodeValid := False;
     UpdateSQLcode;
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ErrorDialog(E.Message);
       Result := mrAbort;
     end;
@@ -373,7 +372,7 @@ end;
 procedure TfrmEventEditor.comboDefinerDropDown(Sender: TObject);
 begin
   // Populate definers from mysql.user
-  (Sender as TComboBox).Items.Assign(GetDefiners);
+  (Sender as TComboBox).Items.Assign(DBObject.Connection.AllUserHostCombinations);
 end;
 
 

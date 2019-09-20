@@ -6,7 +6,7 @@ uses
   Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls,
   ComCtrls, ToolWin, VirtualTrees, SynRegExpr, ActiveX, ExtCtrls, SynEdit,
   SynMemo, Menus, Clipbrd, Math, System.UITypes,
-  grideditlinks, mysql_structures, dbconnection, apphelpers, gnugettext, StrUtils;
+  grideditlinks, dbstructures, dbconnection, apphelpers, gnugettext, StrUtils;
 
 type
   TFrame = TDBObjectEditor;
@@ -86,8 +86,6 @@ type
     menuPasteColumns: TMenuItem;
     tabPartitions: TTabSheet;
     SynMemoPartitions: TSynMemo;
-    pnlDpiHelperBasic: TPanel;
-    pnlDpiHelperOptions: TPanel;
     procedure Modification(Sender: TObject);
     procedure btnAddColumnClick(Sender: TObject);
     procedure btnRemoveColumnClick(Sender: TObject);
@@ -209,7 +207,6 @@ uses main;
 constructor TfrmTableEditor.Create(AOwner: TComponent);
 begin
   inherited;
-  TranslateComponent(Self);
   FixVT(listColumns);
   FixVT(treeIndexes);
   FixVT(listForeignKeys);
@@ -285,7 +282,7 @@ begin
     // Creating new table
     editName.Text := '';
     if DBObject.Connection.Parameters.IsMySQL then
-      comboCollation.ItemIndex := comboCollation.Items.IndexOf(DBObject.Connection.GetVar('SHOW VARIABLES LIKE ''collation_database''', 1));
+      comboCollation.ItemIndex := comboCollation.Items.IndexOf(DBObject.Connection.GetSessionVariable('collation_database'));
     PageControlMain.ActivePage := tabBasic;
   end else begin
     // Editing existing table
@@ -353,7 +350,7 @@ begin
   AlterCodeValid := False;
   PageControlMainChange(Self); // Foreign key editor needs a hit
   // Buttons are randomly moved, since VirtualTree update, see #440
-  btnSave.Top := Height - btnSave.Height - Round(3 * DpiScaleFactor(MainForm));
+  btnSave.Top := Height - btnSave.Height - 3;
   btnHelp.Top := btnSave.Top;
   btnDiscard.Top := btnSave.Top;
   UpdateSQLCode;
@@ -439,7 +436,7 @@ begin
     AlterCodeValid := False;
     CreateCodeValid := False;
   except
-    on E:EDatabaseError do begin
+    on E:EDbError do begin
       ErrorDialog(E.Message);
       Result := mrAbort;
     end;

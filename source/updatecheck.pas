@@ -4,10 +4,10 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, Forms, StdCtrls, IniFiles, Controls, Graphics,
-  apphelpers, gnugettext, ExtCtrls;
+  apphelpers, gnugettext, ExtCtrls, extra_controls;
 
 type
-  TfrmUpdateCheck = class(TForm)
+  TfrmUpdateCheck = class(TExtForm)
     btnCancel: TButton;
     groupBuild: TGroupBox;
     btnBuild: TButton;
@@ -51,7 +51,6 @@ uses main;
 procedure TfrmUpdateCheck.FormCreate(Sender: TObject);
 begin
   // Should be false by default. Callers can set this to True after Create()
-  TranslateComponent(Self);
   imgDonate.OnClick := MainForm.DonateClick;
   imgDonate.Visible := MainForm.HasDonated(False) = nbFalse;
 end;
